@@ -1,0 +1,18 @@
+{
+  "agents": {
+    "agent-1778066983860-ytmwq8": {
+      "agentId": "agent-1778066983860-ytmwq8",
+      "agentType": "researcher",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "provider": "anthropic"
+      },
+      "createdAt": "2026-05-06T11:29:43.860Z",
+      "model": "sonnet",
+      "modelRoutedBy": "default"
+    }
+  },
+  "version": "3.0.0"
+}
