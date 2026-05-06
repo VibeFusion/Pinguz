@@ -10,3 +10,13 @@ build/
 .ruff_cache/
 .mypy_cache/
 .DS_Store
+
+# Ruflo / Claude Flow runtime data
+.swarm/memory.db
+.swarm/memory.db-shm
+.swarm/memory.db-wal
+ruvector.db
+.claude-flow/daemon.pid
+.claude-flow/sessions/
+.claude-flow/logs/
+.claude-flow/data/

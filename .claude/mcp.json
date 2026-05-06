@@ -2,6 +2,18 @@
   "mcpServers": {
     "pinguz": {
       "command": "pinguz"
+    },
+    "ruflo": {
+      "command": "ruflo",
+      "args": ["mcp", "start"],
+      "env": {
+        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+        "CLAUDE_FLOW_MODE": "v3",
+        "CLAUDE_FLOW_HOOKS_ENABLED": "true",
+        "CLAUDE_FLOW_TOPOLOGY": "hierarchical-mesh",
+        "CLAUDE_FLOW_MAX_AGENTS": "15",
+        "CLAUDE_FLOW_MEMORY_BACKEND": "hybrid"
+      }
     }
   }
 }

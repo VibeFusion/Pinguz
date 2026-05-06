@@ -98,3 +98,34 @@ claude mcp add pinguz --env MUAPI_API_KEY=sk-... -- pinguz
 Skills in `.claude/skills/` are invoked as slash commands. They provide production-grade prompt templates for Higgsfield's image and video models. Skills are **Claude prompt guides only** — they do not call the Pinguz MCP tools (which wrap Muapi). For Higgsfield generations, use the separate Higgsfield MCP server (`mcp__e0de92df-85e7-40c1-be0c-eb8c879adb19__*`).
 
 See `ATLAS_PRODUCTION_GUIDE.md` for a complete skill-to-model mapping and workflow documentation.
+
+## Ruflo Multi-Agent Orchestration
+
+Ruflo (v3.7.0) is installed globally (`ruflo`) and registered as an MCP server in `.claude/mcp.json`. It provides swarm orchestration, cross-session vector memory, and agent coordination for complex multi-step workflows.
+
+```bash
+# Check status
+ruflo status
+ruflo doctor
+
+# Memory operations (ATLAS brand knowledge is pre-seeded)
+ruflo memory search -q "ATLAS brand model selection"
+ruflo memory store -k "my-key" --value '{"data": "..."}'
+
+# Swarm for multi-step campaigns
+ruflo hive-mind spawn "Generate a complete ATLAS YouTube segment using brand story skill"
+
+# Daemon (background workers)
+ruflo daemon start
+ruflo daemon stop
+```
+
+**Pre-seeded memory keys:**
+- `atlas-brand-dna` — brand colors, aesthetic, best model selections
+- `atlas-top-prompts` — proven keyframe and I2V prompts
+- `atlas-model-map` — model routing rules and parameter gotchas
+
+**Note:** Vector embeddings require internet access to download the `all-MiniLM-L6-v2` model (~90MB, one-time). Until downloaded, ruflo falls back to mock embeddings which still support basic key-based lookup.
+
+**Ruflo config:** `claude-flow.config.json` (project root) + `.claude-flow/` directory
+**Runtime data:** `.claude-flow/data/`, `.claude-flow/logs/`, `.claude-flow/sessions/`
