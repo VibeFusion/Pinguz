@@ -105,7 +105,13 @@
   </div>
 </div>
 
-<script type="module">
+<!--
+  Deliberately a classic script, not type="module". Safari/WebKit refuses to run module
+  scripts from a file:// page, which silently kills the whole app when the file is opened
+  locally on iOS. Nothing here needs top-level await; the one import is dynamic and only
+  runs when transcription starts.
+-->
+<script>
 const $ = (id) => document.getElementById(id);
 const drop = $('drop'), fileInput = $('file'), go = $('go');
 const statusEl = $('status'), prog = $('prog'), out = $('out');
