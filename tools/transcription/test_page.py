@@ -83,7 +83,32 @@ with sync_playwright() as p:
           "speech engine" in status and "internet" in status, status[:130])
     check("button re-enabled after failure", not page.is_disabled("#go"))
 
-    # 6. No unexpected JS errors beyond the expected network failure
+    # 6. Output stage: text/SRT generation and the download buttons. Driven through the
+    #    test hook so it does not depend on a real transcription run.
+    page.set_input_files("#file", os.path.join(DIR, "test_video.mp4"))
+    page.evaluate("""() => window.__test.setChunks([
+        {start: 2.374, end: 8.204, text: ' Hello, is anyone home?'},
+        {start: 61.5,  end: 65.0,  text: ' Package delivered.'},
+    ])""")
+    txt = page.evaluate("() => window.__test.toText()")
+    srt = page.evaluate("() => window.__test.toSrt()")
+    check("txt lines are timestamped and trimmed",
+          txt.splitlines()[0] == "[00:00:02] Hello, is anyone home?", repr(txt.splitlines()[0]))
+    check("srt block is well formed",
+          srt.startswith("1\n00:00:02,374 --> 00:00:08,204\nHello, is anyone home?"), repr(srt[:60]))
+    check("srt numbering increments",
+          "\n2\n00:01:01,500 --> 00:01:05,000\n" in srt, repr(srt[-70:]))
+    check("clipboard API is available (page is a secure context)",
+          page.evaluate("() => window.isSecureContext && !!navigator.clipboard?.writeText"))
+
+    for btn, ext in [("#dlTxt", ".txt"), ("#dlSrt", ".srt")]:
+        with page.expect_download(timeout=10000) as dl_info:
+            page.click(btn)
+        dl = dl_info.value
+        check(f"{btn} saves as <video name>{ext}",
+              dl.suggested_filename == "test_video" + ext, dl.suggested_filename)
+
+    # 7. No unexpected JS errors beyond the expected network failure
     unexpected = [e for e in console_errors
                   if "jsdelivr" not in e and "Failed to fetch" not in e
                   and "ERR_" not in e and "net::" not in e

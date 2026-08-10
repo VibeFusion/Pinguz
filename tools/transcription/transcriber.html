@@ -196,6 +196,14 @@ function toSrt() {
   return chunks.map((c, i) =>
     `${i + 1}\n${fmt(c.start)} --> ${fmt(c.end)}\n${c.text.trim()}\n`).join('\n');
 }
+// Exposed so the automated tests can exercise the output stage without running a
+// full transcription.
+window.__test = {
+  fmt,
+  toText,
+  toSrt,
+  setChunks(c) { chunks = c; out.textContent = toText(); resultPanel.classList.remove('hide'); },
+};
 window.__fmt = fmt;
 
 // ---- engine ---------------------------------------------------------------
