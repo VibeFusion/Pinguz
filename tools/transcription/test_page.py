@@ -83,6 +83,46 @@ with sync_playwright() as p:
           "speech engine" in status and "internet" in status, status[:130])
     check("button re-enabled after failure", not page.is_disabled("#go"))
 
+    # 5b. Resampling and level handling. The invariant that matters: whatever the source
+    #     rate or channel count, the returned audio must be 16 kHz mono and keep the
+    #     original duration. If a browser hands back native-rate samples and we pass them
+    #     through untouched, this duration check is what catches it.
+    for fixture, true_secs, want_ch in [("rs48k_stereo.webm", 37.973, 2),
+                                        ("rs24k_mono.webm", 37.973, 1)]:
+        page.set_input_files("#file", os.path.join(DIR, fixture))
+        info = page.evaluate(
+            "async () => window.__decodeInfo(document.getElementById('file').files[0])")
+        check(f"{fixture}: resampled to 16 kHz, duration preserved",
+              abs(info["seconds"] - true_secs) < 0.15,
+              f"{info['seconds']:.2f}s vs {true_secs}s, source {info['sourceRate']} Hz")
+        check(f"{fixture}: source rate and channels reported",
+              info["sourceRate"] > 0 and info["channels"] == want_ch,
+              f"{info['sourceRate']} Hz, {info['channels']} ch")
+        check(f"{fixture}: real signal survives the resample", info["peak"] > 0.01,
+              f"peak={info['peak']:.3f}")
+
+    page.set_input_files("#file", os.path.join(DIR, "silent.webm"))
+    sil = page.evaluate(
+        "async () => window.__decodeInfo(document.getElementById('file').files[0])")
+    check("silent clip is flagged as silent", sil["silent"] is True,
+          f"peak={sil['peak']:.5f}")
+    check("silent clip is not amplified", sil["gain"] == 1, f"gain={sil['gain']}")
+
+    page.set_input_files("#file", os.path.join(DIR, "quiet.webm"))
+    q = page.evaluate(
+        "async () => window.__decodeInfo(document.getElementById('file').files[0])")
+    check("quiet clip is boosted, not flagged silent",
+          q["gain"] > 1 and not q["silent"], f"peak={q['peak']:.4f}, gain={q['gain']:.1f}x")
+
+    # 5c. Whisper's non-speech markers must never reach the transcript.
+    for marker in ["[BLANK_AUDIO]", " [BLANK_AUDIO] ", "[MUSIC]", "(wind blowing)", "[ Silence ]"]:
+        check(f"marker filtered: {marker.strip()}",
+              page.evaluate("s => window.__test.isMarker(s)", marker))
+    for real in ["Hello, is anyone home?", "[MUSIC] and then he said hello",
+                 "Package delivered."]:
+        check(f"real speech kept: {real[:28]}",
+              not page.evaluate("s => window.__test.isMarker(s)", real))
+
     # 6. Output stage: text/SRT generation and the download buttons. Driven through the
     #    test hook so it does not depend on a real transcription run.
     page.set_input_files("#file", os.path.join(DIR, "test_video.mp4"))

@@ -92,6 +92,7 @@
 
     <div class="bar"><i id="prog"></i></div>
     <div id="status">Waiting for a file&hellip;</div>
+    <div class="note" id="audioInfo"></div>
     <div class="note" id="engine"></div>
   </div>
 
@@ -115,7 +116,7 @@
 const $ = (id) => document.getElementById(id);
 const drop = $('drop'), fileInput = $('file'), go = $('go');
 const statusEl = $('status'), prog = $('prog'), out = $('out');
-const resultPanel = $('resultPanel'), engineEl = $('engine');
+const resultPanel = $('resultPanel'), engineEl = $('engine'), audioInfoEl = $('audioInfo');
 
 let chosenFile = null;
 let chunks = [];
@@ -166,27 +167,74 @@ function codecHint() {
 
 async function decodeToMono16k(file) {
   const buf = await file.arrayBuffer();
-  // Decoding through a 16 kHz context resamples in one pass, which keeps memory
-  // manageable on long recordings.
   const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  const ctx = new Ctx(1, 1, SAMPLE_RATE);
+
+  // Browsers disagree about whether decodeAudioData resamples to the context's rate:
+  // Chrome does, Safari returns the file's native rate. Assuming either one is wrong
+  // somewhere, and feeding 48 kHz samples to a model expecting 16 kHz makes speech run
+  // ~3x fast and transcribe as silence. So decode at whatever rate comes back, then
+  // resample explicitly below.
   let decoded;
   try {
-    decoded = await ctx.decodeAudioData(buf);
+    decoded = await new Ctx(1, 1, 48000).decodeAudioData(buf);
   } catch (err) {
     throw new Error('This browser could not decode the audio in ' + file.name + '.' +
                     codecHint());
   }
-  if (decoded.numberOfChannels === 1) return decoded.getChannelData(0);
-  // Downmix to mono.
-  const a = decoded.getChannelData(0), b = decoded.getChannelData(1);
-  const mono = new Float32Array(a.length);
-  for (let i = 0; i < a.length; i++) mono[i] = (a[i] + b[i]) / 2;
-  return mono;
+
+  // Rendering through a 1-channel, 16 kHz context downmixes and resamples in one
+  // correct pass, whatever the source layout was.
+  let mono;
+  if (decoded.numberOfChannels === 1 && decoded.sampleRate === SAMPLE_RATE) {
+    mono = decoded.getChannelData(0);
+  } else {
+    const frames = Math.max(1, Math.ceil(decoded.duration * SAMPLE_RATE));
+    const off = new Ctx(1, frames, SAMPLE_RATE);
+    const node = off.createBufferSource();
+    node.buffer = decoded;
+    node.connect(off.destination);
+    node.start();
+    mono = (await off.startRendering()).getChannelData(0);
+  }
+
+  let peak = 0;
+  for (let i = 0; i < mono.length; i++) {
+    const v = mono[i] < 0 ? -mono[i] : mono[i];
+    if (v > peak) peak = v;
+  }
+
+  // Doorbell and body-cam audio is often recorded far below full scale. Whisper is
+  // much more likely to return [BLANK_AUDIO] on a very quiet track, so lift it —
+  // capped, so we do not simply amplify the noise floor of a genuinely silent clip.
+  let gain = 1;
+  if (peak > 0.002 && peak < 0.5) {
+    gain = Math.min(8, 0.85 / peak);
+    for (let i = 0; i < mono.length; i++) mono[i] *= gain;
+  }
+
+  return {
+    audio: mono,
+    info: {
+      seconds: mono.length / SAMPLE_RATE,
+      sourceRate: decoded.sampleRate,
+      channels: decoded.numberOfChannels,
+      peak,
+      gain,
+      silent: peak < 0.002,
+    },
+  };
 }
-window.__decodeToMono16k = decodeToMono16k; // exposed for automated testing
+window.__decodeToMono16k = async (f) => (await decodeToMono16k(f)).audio; // for tests
+window.__decodeInfo = async (f) => (await decodeToMono16k(f)).info;
 
 // ---- formatting -----------------------------------------------------------
+// Whisper emits bracketed markers such as [BLANK_AUDIO], [MUSIC] or (wind blowing) for
+// stretches it hears as non-speech. They are annotations, not transcript, so they must
+// never reach the output.
+function isMarker(s) {
+  return !s.replace(/[\[(][^\])]*[\])]/g, '').replace(/[\s.,\-–—]/g, '');
+}
+
 function fmt(t, sep = ',') {
   if (!isFinite(t) || t < 0) t = 0;
   const ms = Math.round(t * 1000);
@@ -208,6 +256,7 @@ window.__test = {
   fmt,
   toText,
   toSrt,
+  isMarker,
   setChunks(c) { chunks = c; out.textContent = toText(); resultPanel.classList.remove('hide'); },
 };
 window.__fmt = fmt;
@@ -260,8 +309,24 @@ go.addEventListener('click', async () => {
 
   try {
     setStatus('Reading audio from the file…');
-    const audio = await decodeToMono16k(chosenFile);
-    const minutes = audio.length / SAMPLE_RATE / 60;
+    const { audio, info } = await decodeToMono16k(chosenFile);
+    const minutes = info.seconds / 60;
+
+    // Surface what was actually decoded. If a run comes back empty, this is what
+    // separates "the clip has no sound" from "the audio was mangled on the way in".
+    audioInfoEl.textContent =
+      `Audio: ${minutes.toFixed(1)} min · source ${info.sourceRate} Hz ` +
+      `${info.channels === 1 ? 'mono' : info.channels + ' ch'} · ` +
+      `peak level ${info.peak.toFixed(3)}` +
+      (info.gain > 1 ? ` · boosted ${info.gain.toFixed(1)}x` : '');
+
+    if (info.silent) {
+      setStatus('This clip has no audible sound — its audio track is effectively ' +
+                'silent, so there is nothing to transcribe. Check that the camera ' +
+                'had its microphone enabled for this recording.', 'err');
+      setProgress(0);
+      return;
+    }
 
     const modelId = $('model').value;
     if (!pipe || pipe.__modelId !== modelId) {
@@ -286,15 +351,19 @@ go.addEventListener('click', async () => {
       start: c.timestamp?.[0] ?? 0,
       end: c.timestamp?.[1] ?? 0,
       text: c.text || '',
-    })).filter(c => c.text.trim());
+    })).filter(c => c.text.trim() && !isMarker(c.text.trim()));
 
-    if (!chunks.length && result.text) {
-      chunks = [{ start: 0, end: audio.length / SAMPLE_RATE, text: result.text }];
+    if (!chunks.length && result.text && !isMarker(result.text.trim())) {
+      chunks = [{ start: 0, end: info.seconds, text: result.text }];
     }
 
     setProgress(1);
     if (!chunks.length) {
-      setStatus('Finished, but no speech was detected in this file.', 'err');
+      setStatus('Finished, but no speech was found. The audio decoded correctly ' +
+                `(peak level ${info.peak.toFixed(3)}), so this clip most likely ` +
+                'contains only background noise. If you can hear talking in it, try ' +
+                'the Large turbo model, which is much better on faint or distant speech.',
+                'err');
     } else {
       out.textContent = toText();
       resultPanel.classList.remove('hide');
