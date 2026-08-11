@@ -1,0 +1,185 @@
+import subprocess, sys, time, threading, http.server, socketserver, os, functools
+from playwright.sync_api import sync_playwright
+
+DIR = os.path.dirname(os.path.abspath(__file__))
+PORT = 8899
+
+handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=DIR)
+socketserver.TCPServer.allow_reuse_address = True
+httpd = socketserver.TCPServer(("127.0.0.1", PORT), handler)
+threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+failures = []
+def check(name, cond, detail=""):
+    print(("PASS  " if cond else "FAIL  ") + name + (f"  {detail}" if detail else ""))
+    if not cond:
+        failures.append(name)
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(
+        executable_path="/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+        args=["--no-sandbox", "--autoplay-policy=no-user-gesture-required"],
+    )
+    page = browser.new_page()
+    console_errors = []
+    page.on("console", lambda m: console_errors.append(m.text) if m.type == "error" else None)
+    page.on("pageerror", lambda e: console_errors.append("PAGEERROR: " + str(e)))
+
+    page.goto(f"http://127.0.0.1:{PORT}/transcriber.html")
+    page.wait_for_function("window.__ready === true", timeout=15000)
+    check("page loads and module script executes", True)
+
+    # 1. UI renders
+    check("title renders", page.inner_text("h1") == "Video Transcriber")
+    check("transcribe button starts disabled", page.is_disabled("#go"))
+
+    # 2. Timestamp formatting
+    cases = [(0, "00:00:00,000"), (2.374, "00:00:02,374"), (61.5, "00:01:01,500"),
+             (3723.004, "01:02:03,004"), (-5, "00:00:00,000")]
+    for secs, want in cases:
+        got = page.evaluate("s => window.__fmt(s)", secs)
+        check(f"fmt({secs}) == {want}", got == want, f"got {got}")
+
+    # 3. File selection updates UI
+    page.set_input_files("#file", os.path.join(DIR, "test_video.mp4"))
+    page.wait_for_function("document.getElementById('go').disabled === false", timeout=5000)
+    check("file selection enables transcribe", not page.is_disabled("#go"))
+    check("file name shown in dropzone", "test_video.mp4" in page.inner_text("#drop"),
+          page.inner_text("#drop").replace("\n", " | "))
+
+    # 4. Audio decoding on a real video container (webm, since this Chromium build
+    #    ships without the proprietary AAC/H.264 codecs that real Chrome includes)
+    page.set_input_files("#file", os.path.join(DIR, "test_video.webm"))
+    res = page.evaluate("""async () => {
+        const f = document.getElementById('file').files[0];
+        const audio = await window.__decodeToMono16k(f);
+        let peak = 0;
+        for (let i = 0; i < audio.length; i++) peak = Math.max(peak, Math.abs(audio[i]));
+        return { length: audio.length, seconds: audio.length / 16000, peak,
+                 type: audio.constructor.name };
+    }""")
+    check("decodes mp4 audio to Float32Array", res["type"] == "Float32Array", res["type"])
+    check("decoded at 16 kHz mono, ~38 s", 36 < res["seconds"] < 40,
+          f"{res['seconds']:.2f}s, {res['length']} samples")
+    check("decoded audio contains real signal", res["peak"] > 0.01, f"peak={res['peak']:.3f}")
+
+    # 4b. Undecodable container yields a specific, actionable message rather than a raw
+    #     EncodingError. Exercised here via the mp4 this Chromium cannot decode.
+    page.set_input_files("#file", os.path.join(DIR, "test_video.mp4"))
+    msg = page.evaluate("""async () => { try {
+        await window.__decodeToMono16k(document.getElementById('file').files[0]);
+        return 'DECODED';
+    } catch (e) { return e.message; } }""")
+    check("undecodable file gives actionable error, not EncodingError",
+          "could not decode" in msg and "AAC" in msg and "ffmpeg" in msg, msg[:150])
+
+    # 5. Engine-load failure path shows a helpful message (CDN is blocked in this sandbox)
+    page.set_input_files("#file", os.path.join(DIR, "test_video.webm"))
+    page.click("#go")
+    page.wait_for_function(
+        "document.getElementById('status').classList.contains('err')", timeout=90000)
+    status = page.inner_text("#status")
+    check("CDN failure surfaces a clear, actionable error",
+          "speech engine" in status and "internet" in status, status[:130])
+    check("button re-enabled after failure", not page.is_disabled("#go"))
+
+    # 5b. Resampling and level handling. The invariant that matters: whatever the source
+    #     rate or channel count, the returned audio must be 16 kHz mono and keep the
+    #     original duration. If a browser hands back native-rate samples and we pass them
+    #     through untouched, this duration check is what catches it.
+    for fixture, true_secs, want_ch in [("rs48k_stereo.webm", 37.973, 2),
+                                        ("rs24k_mono.webm", 37.973, 1)]:
+        page.set_input_files("#file", os.path.join(DIR, fixture))
+        info = page.evaluate(
+            "async () => window.__decodeInfo(document.getElementById('file').files[0])")
+        check(f"{fixture}: resampled to 16 kHz, duration preserved",
+              abs(info["seconds"] - true_secs) < 0.15,
+              f"{info['seconds']:.2f}s vs {true_secs}s, source {info['sourceRate']} Hz")
+        check(f"{fixture}: source rate and channels reported",
+              info["sourceRate"] > 0 and info["channels"] == want_ch,
+              f"{info['sourceRate']} Hz, {info['channels']} ch")
+        check(f"{fixture}: real signal survives the resample", info["peak"] > 0.01,
+              f"peak={info['peak']:.3f}")
+
+    page.set_input_files("#file", os.path.join(DIR, "silent.webm"))
+    sil = page.evaluate(
+        "async () => window.__decodeInfo(document.getElementById('file').files[0])")
+    check("silent clip is flagged as silent", sil["silent"] is True,
+          f"peak={sil['peak']:.5f}")
+    check("silent clip is not amplified", sil["gain"] == 1, f"gain={sil['gain']}")
+
+    page.set_input_files("#file", os.path.join(DIR, "quiet.webm"))
+    q = page.evaluate(
+        "async () => window.__decodeInfo(document.getElementById('file').files[0])")
+    check("quiet clip is boosted, not flagged silent",
+          q["gain"] > 1 and not q["silent"], f"peak={q['peak']:.4f}, gain={q['gain']:.1f}x")
+
+    # 5c. Whisper's non-speech markers must never reach the transcript.
+    for marker in ["[BLANK_AUDIO]", " [BLANK_AUDIO] ", "[MUSIC]", "(wind blowing)", "[ Silence ]"]:
+        check(f"marker filtered: {marker.strip()}",
+              page.evaluate("s => window.__test.isMarker(s)", marker))
+    for real in ["Hello, is anyone home?", "[MUSIC] and then he said hello",
+                 "Package delivered."]:
+        check(f"real speech kept: {real[:28]}",
+              not page.evaluate("s => window.__test.isMarker(s)", real))
+
+    # 6. Output stage: text/SRT generation and the download buttons. Driven through the
+    #    test hook so it does not depend on a real transcription run.
+    page.set_input_files("#file", os.path.join(DIR, "test_video.mp4"))
+    page.evaluate("""() => window.__test.setChunks([
+        {start: 2.374, end: 8.204, text: ' Hello, is anyone home?'},
+        {start: 61.5,  end: 65.0,  text: ' Package delivered.'},
+    ])""")
+    txt = page.evaluate("() => window.__test.toText()")
+    srt = page.evaluate("() => window.__test.toSrt()")
+    check("txt lines are timestamped and trimmed",
+          txt.splitlines()[0] == "[00:00:02] Hello, is anyone home?", repr(txt.splitlines()[0]))
+    check("srt block is well formed",
+          srt.startswith("1\n00:00:02,374 --> 00:00:08,204\nHello, is anyone home?"), repr(srt[:60]))
+    check("srt numbering increments",
+          "\n2\n00:01:01,500 --> 00:01:05,000\n" in srt, repr(srt[-70:]))
+    check("clipboard API is available (page is a secure context)",
+          page.evaluate("() => window.isSecureContext && !!navigator.clipboard?.writeText"))
+
+    for btn, ext in [("#dlTxt", ".txt"), ("#dlSrt", ".srt")]:
+        with page.expect_download(timeout=10000) as dl_info:
+            page.click(btn)
+        dl = dl_info.value
+        check(f"{btn} saves as <video name>{ext}",
+              dl.suggested_filename == "test_video" + ext, dl.suggested_filename)
+
+    # 6b. Audio export must produce a real, decodable 16 kHz mono WAV — this file is
+    #     meant to travel to places the source video is too large to reach, so a
+    #     malformed header would be silent data loss.
+    page.set_input_files("#file", os.path.join(DIR, "rs48k_stereo.webm"))
+    with page.expect_download(timeout=30000) as dl_info:
+        page.click("#dlAudio")
+    wav = dl_info.value
+    check("audio export names the file after the source",
+          wav.suggested_filename == "rs48k_stereo.wav", wav.suggested_filename)
+    saved = os.path.join(DIR, "exported_check.wav")
+    wav.save_as(saved)
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries",
+         "stream=codec_name,sample_rate,channels:format=duration",
+         "-of", "default=nw=1", saved],
+        capture_output=True, text=True).stdout
+    check("exported wav is 16 kHz mono PCM",
+          "sample_rate=16000" in probe and "channels=1" in probe
+          and "pcm_s16le" in probe, probe.replace("\n", " ").strip())
+    check("exported wav keeps the full duration",
+          abs(float(dict(l.split("=") for l in probe.strip().splitlines())["duration"])
+              - 37.973) < 0.15, probe.replace("\n", " ").strip())
+
+    # 7. No unexpected JS errors beyond the expected network failure
+    unexpected = [e for e in console_errors
+                  if "jsdelivr" not in e and "Failed to fetch" not in e
+                  and "ERR_" not in e and "net::" not in e
+                  and "favicon" not in e and "404" not in e]
+    check("no unexpected JS errors", not unexpected, str(unexpected)[:200])
+
+    browser.close()
+
+httpd.shutdown()
+print("\n" + ("ALL CHECKS PASSED" if not failures else f"FAILURES: {failures}"))
+sys.exit(1 if failures else 0)

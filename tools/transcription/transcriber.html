@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Transcriber</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --ink: #e7eaf0;
+    --muted: #99a1b3; --accent: #6ea8fe; --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px; margin-bottom: 18px;
+  }
+  #drop {
+    border: 2px dashed var(--line); border-radius: 12px; padding: 40px 20px;
+    text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  #drop:hover, #drop.over { border-color: var(--accent); background: #1b2130; }
+  #drop strong { display: block; font-size: 17px; margin-bottom: 6px; }
+  #drop span { color: var(--muted); font-size: 14px; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; margin-top: 4px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  select, button {
+    font: inherit; color: var(--ink); background: #1e2431;
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px;
+  }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .bar { height: 8px; background: #10131a; border-radius: 99px; overflow: hidden; margin-top: 12px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  #status { margin-top: 12px; font-size: 14px; color: var(--muted); min-height: 22px; }
+  #status.err { color: var(--err); }
+  #status.ok { color: var(--ok); }
+  #out {
+    white-space: pre-wrap; font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: #10131a; border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px; max-height: 460px; overflow: auto; margin-top: 4px;
+  }
+  .hide { display: none; }
+  .note { font-size: 13px; color: var(--muted); margin-top: 14px; }
+  .note code { background: #10131a; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Video Transcriber</h1>
+  <p class="sub">Runs entirely in your browser. Your video is never uploaded anywhere.</p>
+
+  <div class="panel">
+    <div id="drop">
+      <strong>Drop a video or audio file here</strong>
+      <span>or click to choose &mdash; any size, any length</span>
+    </div>
+    <input id="file" type="file" accept="video/*,audio/*" class="hide">
+
+    <div class="row" style="margin-top:18px">
+      <div class="field">
+        <label for="model">Accuracy</label>
+        <select id="model">
+          <option value="onnx-community/whisper-base">Base &mdash; fast</option>
+          <option value="onnx-community/whisper-small" selected>Small &mdash; balanced</option>
+          <option value="onnx-community/whisper-large-v3-turbo">Large turbo &mdash; best</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="lang">Language</label>
+        <select id="lang">
+          <option value="en" selected>English</option>
+          <option value="">Auto-detect</option>
+          <option value="es">Spanish</option>
+          <option value="fr">French</option>
+          <option value="de">German</option>
+          <option value="pt">Portuguese</option>
+          <option value="hi">Hindi</option>
+          <option value="zh">Chinese</option>
+        </select>
+      </div>
+      <button id="go" class="primary" disabled>Transcribe</button>
+      <button id="dlAudio" disabled title="Save just the audio as a small .wav file">Export audio only</button>
+    </div>
+
+    <div class="bar"><i id="prog"></i></div>
+    <div id="status">Waiting for a file&hellip;</div>
+    <div class="note" id="audioInfo"></div>
+    <div class="note" id="engine"></div>
+  </div>
+
+  <div class="panel hide" id="resultPanel">
+    <div class="row" style="margin-bottom:12px">
+      <button id="copy">Copy text</button>
+      <button id="dlTxt">Download .txt</button>
+      <button id="dlSrt">Download .srt</button>
+    </div>
+    <div id="out"></div>
+  </div>
+</div>
+
+<!--
+  Deliberately a classic script, not type="module". Safari/WebKit refuses to run module
+  scripts from a file:// page, which silently kills the whole app when the file is opened
+  locally on iOS. Nothing here needs top-level await; the one import is dynamic and only
+  runs when transcription starts.
+-->
+<script>
+const $ = (id) => document.getElementById(id);
+const drop = $('drop'), fileInput = $('file'), go = $('go');
+const statusEl = $('status'), prog = $('prog'), out = $('out');
+const resultPanel = $('resultPanel'), engineEl = $('engine'), audioInfoEl = $('audioInfo');
+
+let chosenFile = null;
+let chunks = [];
+
+function setStatus(msg, kind = '') {
+  statusEl.textContent = msg;
+  statusEl.className = kind;
+}
+function setProgress(fraction) {
+  prog.style.width = Math.max(0, Math.min(1, fraction)) * 100 + '%';
+}
+
+// ---- file selection -------------------------------------------------------
+drop.addEventListener('click', () => fileInput.click());
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', (e) => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  if (e.dataTransfer.files.length) pickFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) pickFile(fileInput.files[0]);
+});
+
+function pickFile(f) {
+  chosenFile = f;
+  drop.querySelector('strong').textContent = f.name;
+  drop.querySelector('span').textContent =
+    (f.size / 1e6).toFixed(1) + ' MB — ready to transcribe';
+  go.disabled = false;
+  $('dlAudio').disabled = false;
+  setStatus('Ready.');
+}
+
+// ---- audio decoding (no network needed) -----------------------------------
+const SAMPLE_RATE = 16000;
+
+function codecHint() {
+  const v = document.createElement('video');
+  // Most phone and security-camera video is H.264 + AAC. Browsers built without
+  // those proprietary codecs (plain Chromium, some Linux builds) cannot decode it.
+  return v.canPlayType('audio/mp4; codecs="mp4a.40.2"') ? '' :
+    ' Your browser was built without AAC support, which is what most phone and ' +
+    'security-camera video uses. Google Chrome, Edge, or Safari will handle it. ' +
+    'Alternatively convert the file first with: ' +
+    'ffmpeg -i INPUT -vn -ac 1 -ar 16000 output.wav';
+}
+
+async function decodeToMono16k(file) {
+  const buf = await file.arrayBuffer();
+  const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+
+  // Browsers disagree about whether decodeAudioData resamples to the context's rate:
+  // Chrome does, Safari returns the file's native rate. Assuming either one is wrong
+  // somewhere, and feeding 48 kHz samples to a model expecting 16 kHz makes speech run
+  // ~3x fast and transcribe as silence. So decode at whatever rate comes back, then
+  // resample explicitly below.
+  let decoded;
+  try {
+    decoded = await new Ctx(1, 1, 48000).decodeAudioData(buf);
+  } catch (err) {
+    throw new Error('This browser could not decode the audio in ' + file.name + '.' +
+                    codecHint());
+  }
+
+  // Rendering through a 1-channel, 16 kHz context downmixes and resamples in one
+  // correct pass, whatever the source layout was.
+  let mono;
+  if (decoded.numberOfChannels === 1 && decoded.sampleRate === SAMPLE_RATE) {
+    mono = decoded.getChannelData(0);
+  } else {
+    const frames = Math.max(1, Math.ceil(decoded.duration * SAMPLE_RATE));
+    const off = new Ctx(1, frames, SAMPLE_RATE);
+    const node = off.createBufferSource();
+    node.buffer = decoded;
+    node.connect(off.destination);
+    node.start();
+    mono = (await off.startRendering()).getChannelData(0);
+  }
+
+  let peak = 0;
+  for (let i = 0; i < mono.length; i++) {
+    const v = mono[i] < 0 ? -mono[i] : mono[i];
+    if (v > peak) peak = v;
+  }
+
+  // Doorbell and body-cam audio is often recorded far below full scale. Whisper is
+  // much more likely to return [BLANK_AUDIO] on a very quiet track, so lift it —
+  // capped, so we do not simply amplify the noise floor of a genuinely silent clip.
+  let gain = 1;
+  if (peak > 0.002 && peak < 0.5) {
+    gain = Math.min(8, 0.85 / peak);
+    for (let i = 0; i < mono.length; i++) mono[i] *= gain;
+  }
+
+  return {
+    audio: mono,
+    info: {
+      seconds: mono.length / SAMPLE_RATE,
+      sourceRate: decoded.sampleRate,
+      channels: decoded.numberOfChannels,
+      peak,
+      gain,
+      silent: peak < 0.002,
+    },
+  };
+}
+window.__decodeToMono16k = async (f) => (await decodeToMono16k(f)).audio; // for tests
+window.__decodeInfo = async (f) => (await decodeToMono16k(f)).info;
+
+// ---- formatting -----------------------------------------------------------
+// Whisper emits bracketed markers such as [BLANK_AUDIO], [MUSIC] or (wind blowing) for
+// stretches it hears as non-speech. They are annotations, not transcript, so they must
+// never reach the output.
+function isMarker(s) {
+  return !s.replace(/[\[(][^\])]*[\])]/g, '').replace(/[\s.,\-–—]/g, '');
+}
+
+function fmt(t, sep = ',') {
+  if (!isFinite(t) || t < 0) t = 0;
+  const ms = Math.round(t * 1000);
+  const h = String(Math.floor(ms / 3600000)).padStart(2, '0');
+  const m = String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0');
+  const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, '0');
+  return `${h}:${m}:${s}${sep}${String(ms % 1000).padStart(3, '0')}`;
+}
+function toText() {
+  return chunks.map(c => `[${fmt(c.start, '.').slice(0, 8)}] ${c.text.trim()}`).join('\n');
+}
+function toSrt() {
+  return chunks.map((c, i) =>
+    `${i + 1}\n${fmt(c.start)} --> ${fmt(c.end)}\n${c.text.trim()}\n`).join('\n');
+}
+// Exposed so the automated tests can exercise the output stage without running a
+// full transcription.
+window.__test = {
+  fmt,
+  toText,
+  toSrt,
+  isMarker,
+  setChunks(c) { chunks = c; out.textContent = toText(); resultPanel.classList.remove('hide'); },
+};
+window.__fmt = fmt;
+
+// ---- engine ---------------------------------------------------------------
+let pipe = null;
+let transformers = null;
+
+async function loadTransformers() {
+  if (transformers) return transformers;
+  setStatus('Loading the speech engine…');
+  try {
+    transformers = await import(
+      'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1');
+  } catch (err) {
+    throw new Error(
+      'Could not load the speech engine. This page needs internet access the first ' +
+      'time you use it (it downloads the speech model, then works offline). ' +
+      'Underlying error: ' + err.message);
+  }
+  return transformers;
+}
+
+async function getPipeline(modelId) {
+  const { pipeline } = await loadTransformers();
+  const webgpu = !!navigator.gpu;
+  engineEl.textContent = webgpu
+    ? 'Using your GPU (WebGPU) — this will be fast.'
+    : 'Using CPU. For much faster results, open this page in Chrome or Edge.';
+  return pipeline('automatic-speech-recognition', modelId, {
+    device: webgpu ? 'webgpu' : 'wasm',
+    dtype: webgpu ? 'q4' : 'q8',
+    progress_callback: (p) => {
+      if (p.status === 'progress' && p.total) {
+        setProgress(0.5 * (p.loaded / p.total));
+        setStatus(`Downloading speech model: ${(p.loaded / 1e6).toFixed(0)} of ` +
+                  `${(p.total / 1e6).toFixed(0)} MB (one time only)`);
+      } else if (p.status === 'ready') {
+        setStatus('Model ready.');
+      }
+    },
+  });
+}
+
+go.addEventListener('click', async () => {
+  if (!chosenFile) return;
+  go.disabled = true;
+  resultPanel.classList.add('hide');
+  setProgress(0);
+
+  try {
+    setStatus('Reading audio from the file…');
+    const { audio, info } = await decodeToMono16k(chosenFile);
+    const minutes = info.seconds / 60;
+
+    // Surface what was actually decoded. If a run comes back empty, this is what
+    // separates "the clip has no sound" from "the audio was mangled on the way in".
+    audioInfoEl.textContent =
+      `Audio: ${minutes.toFixed(1)} min · source ${info.sourceRate} Hz ` +
+      `${info.channels === 1 ? 'mono' : info.channels + ' ch'} · ` +
+      `peak level ${info.peak.toFixed(3)}` +
+      (info.gain > 1 ? ` · boosted ${info.gain.toFixed(1)}x` : '');
+
+    if (info.silent) {
+      setStatus('This clip has no audible sound — its audio track is effectively ' +
+                'silent, so there is nothing to transcribe. Check that the camera ' +
+                'had its microphone enabled for this recording.', 'err');
+      setProgress(0);
+      return;
+    }
+
+    const modelId = $('model').value;
+    if (!pipe || pipe.__modelId !== modelId) {
+      pipe = await getPipeline(modelId);
+      pipe.__modelId = modelId;
+    }
+
+    setProgress(0.5);
+    setStatus(`Transcribing ${minutes.toFixed(1)} minutes of audio… ` +
+              `this tab will be busy for a while.`);
+    await new Promise(r => setTimeout(r, 50)); // let the UI repaint first
+
+    const lang = $('lang').value;
+    const result = await pipe(audio, {
+      return_timestamps: true,
+      chunk_length_s: 30,
+      stride_length_s: 5,
+      ...(lang ? { language: lang, task: 'transcribe' } : {}),
+    });
+
+    chunks = (result.chunks || []).map(c => ({
+      start: c.timestamp?.[0] ?? 0,
+      end: c.timestamp?.[1] ?? 0,
+      text: c.text || '',
+    })).filter(c => c.text.trim() && !isMarker(c.text.trim()));
+
+    if (!chunks.length && result.text && !isMarker(result.text.trim())) {
+      chunks = [{ start: 0, end: info.seconds, text: result.text }];
+    }
+
+    setProgress(1);
+    if (!chunks.length) {
+      setStatus('Finished, but no speech was found. The audio decoded correctly ' +
+                `(peak level ${info.peak.toFixed(3)}), so this clip most likely ` +
+                'contains only background noise. If you can hear talking in it, try ' +
+                'the Large turbo model, which is much better on faint or distant speech.',
+                'err');
+    } else {
+      out.textContent = toText();
+      resultPanel.classList.remove('hide');
+      setStatus(`Done — ${chunks.length} segments transcribed.`, 'ok');
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus(err.message || String(err), 'err');
+    setProgress(0);
+  } finally {
+    go.disabled = false;
+  }
+});
+
+// ---- audio export ---------------------------------------------------------
+// A 16 kHz mono WAV of a long recording is a small fraction of the original video
+// (roughly 1.9 MB per minute), which makes it small enough to send places the video
+// itself cannot go.
+function encodeWav(samples, rate) {
+  const bytes = samples.length * 2;
+  const view = new DataView(new ArrayBuffer(44 + bytes));
+  const str = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  str(0, 'RIFF');  view.setUint32(4, 36 + bytes, true);  str(8, 'WAVE');
+  str(12, 'fmt '); view.setUint32(16, 16, true);         view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);                           view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);                    view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  str(36, 'data'); view.setUint32(40, bytes, true);
+  let off = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    off += 2;
+  }
+  return new Blob([view.buffer], { type: 'audio/wav' });
+}
+window.__test_encodeWav = encodeWav;
+
+$('dlAudio').addEventListener('click', async () => {
+  if (!chosenFile) return;
+  const btn = $('dlAudio');
+  btn.disabled = true;
+  try {
+    setStatus('Extracting audio…');
+    const { audio, info } = await decodeToMono16k(chosenFile);
+    const blob = encodeWav(audio, SAMPLE_RATE);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = baseName() + '.wav'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setStatus(`Audio saved: ${(blob.size / 1e6).toFixed(1)} MB, ` +
+              `${(info.seconds / 60).toFixed(1)} min.`, 'ok');
+  } catch (err) {
+    setStatus(err.message || String(err), 'err');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---- output actions -------------------------------------------------------
+function download(name, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+const baseName = () => (chosenFile?.name || 'transcript').replace(/\.[^.]+$/, '');
+$('copy').addEventListener('click', async () => {
+  await navigator.clipboard.writeText(toText());
+  $('copy').textContent = 'Copied';
+  setTimeout(() => ($('copy').textContent = 'Copy text'), 1500);
+});
+$('dlTxt').addEventListener('click', () => download(baseName() + '.txt', toText()));
+$('dlSrt').addEventListener('click', () => download(baseName() + '.srt', toSrt()));
+
+window.__ready = true;
+</script>
+</body>
+</html>
