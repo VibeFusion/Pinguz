@@ -148,6 +148,29 @@ with sync_playwright() as p:
         check(f"{btn} saves as <video name>{ext}",
               dl.suggested_filename == "test_video" + ext, dl.suggested_filename)
 
+    # 6b. Audio export must produce a real, decodable 16 kHz mono WAV — this file is
+    #     meant to travel to places the source video is too large to reach, so a
+    #     malformed header would be silent data loss.
+    page.set_input_files("#file", os.path.join(DIR, "rs48k_stereo.webm"))
+    with page.expect_download(timeout=30000) as dl_info:
+        page.click("#dlAudio")
+    wav = dl_info.value
+    check("audio export names the file after the source",
+          wav.suggested_filename == "rs48k_stereo.wav", wav.suggested_filename)
+    saved = os.path.join(DIR, "exported_check.wav")
+    wav.save_as(saved)
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries",
+         "stream=codec_name,sample_rate,channels:format=duration",
+         "-of", "default=nw=1", saved],
+        capture_output=True, text=True).stdout
+    check("exported wav is 16 kHz mono PCM",
+          "sample_rate=16000" in probe and "channels=1" in probe
+          and "pcm_s16le" in probe, probe.replace("\n", " ").strip())
+    check("exported wav keeps the full duration",
+          abs(float(dict(l.split("=") for l in probe.strip().splitlines())["duration"])
+              - 37.973) < 0.15, probe.replace("\n", " ").strip())
+
     # 7. No unexpected JS errors beyond the expected network failure
     unexpected = [e for e in console_errors
                   if "jsdelivr" not in e and "Failed to fetch" not in e
