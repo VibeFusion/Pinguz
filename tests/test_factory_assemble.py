@@ -30,8 +30,23 @@ def test_build_command_layout(monkeypatch):
     fc = cmd[cmd.index("-filter_complex") + 1]
     assert "concat=n=2:v=1:a=0[vc]" in fc and "[vc]ass=captions.ass[vout]" in fc
     assert cmd[cmd.index("-map") + 1] == "[vout]"
-    assert "2:a" in cmd  # audio is input index 2
+    assert "[2:a]loudnorm" in fc and "[aout]" in cmd  # narration is input 2, normalised
+    assert "-r" in cmd and cmd[cmd.index("-r") + 1] == "30"
     assert cmd[-1] == "out.mp4"
+
+
+def test_build_command_with_music_ducks_under_voice(monkeypatch):
+    monkeypatch.setattr(assemble, "ffmpeg_exe", lambda: "ffmpeg")
+    clip = Clip("a", Path("a.mp4"), "c", "p", 10, "m", "r")
+    cmd = assemble.build_command(
+        [timeline.Segment(clip, 0, 2)], Path("v.wav"), "c.ass", Path("o.mp4"),
+        music_path=Path("bed.wav"), music_db=-20,
+    )
+    assert cmd.count("-i") == 3 and "-stream_loop" in cmd  # clip, voice, looped bed
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "volume=-20dB" in fc
+    assert "sidechaincompress" in fc and "amix=inputs=2:duration=first" in fc
+    assert "loudnorm" in fc
 
 
 def test_build_command_rejects_paths_in_ass_name():

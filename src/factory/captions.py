@@ -14,6 +14,12 @@ _STYLE_VALUES = (
     "Word,{font},{size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,"
     "-1,0,0,0,100,100,0,0,1,{outline},{shadow},5,60,60,0,1"
 )
+# Hook card: smaller, boxed (BorderStyle 3), top-centre (alignment 8), inside the
+# safe area — MarginV keeps it out of the top 10% that platform UI covers.
+_HOOK_STYLE_VALUES = (
+    "Hook,{font},{hook_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,"
+    "-1,0,0,0,100,100,0,0,3,14,0,8,80,80,{hook_margin},1"
+)
 _HEADER = (
     "[Script Info]\n"
     "ScriptType: v4.00+\n"
@@ -25,6 +31,7 @@ _HEADER = (
     "[V4+ Styles]\n"
     f"Format: {_STYLE_FIELDS}\n"
     f"Style: {_STYLE_VALUES}\n"
+    f"Style: {_HOOK_STYLE_VALUES}\n"
     "\n"
     "[Events]\n"
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
@@ -32,6 +39,8 @@ _HEADER = (
 
 # Hold the last card on screen briefly rather than cutting to nothing.
 _TAIL_HOLD = 0.3
+# ASS colours are &HBBGGRR&
+HIGHLIGHT_YELLOW = "&H00FFFF&"
 
 
 def format_time(seconds: float) -> str:
@@ -72,6 +81,36 @@ def group_words(words: list[Word], per_card: int) -> list[tuple[float, float, st
     return out
 
 
+def karaoke_lines(words: list[Word], per_card: int, *, uppercase: bool = False) -> list[str]:
+    """One Dialogue per spoken word; the card stays up, the current word is highlighted.
+
+    This is the "word pop" / karaoke style standard on story channels: 3-5 word
+    pages so the eye has context, colour on the word being spoken so it tracks
+    the audio.
+    """
+    out: list[str] = []
+    for i in range(0, len(words), per_card):
+        chunk = words[i : i + per_card]
+        next_start = words[i + per_card].start if i + per_card < len(words) else None
+        for j, w in enumerate(chunk):
+            start = w.start
+            if j + 1 < len(chunk):
+                end = max(w.end, chunk[j + 1].start)
+            elif next_start is not None:
+                end = max(w.end, next_start)
+            else:
+                end = w.end + _TAIL_HOLD
+            parts = []
+            for k, ww in enumerate(chunk):
+                txt = _escape(ww.text.upper() if uppercase else ww.text)
+                parts.append(f"{{\\1c{HIGHLIGHT_YELLOW}}}{txt}{{\\r}}" if k == j else txt)
+            text = " ".join(parts)
+            out.append(
+                f"Dialogue: 0,{format_time(start)},{format_time(end)},Word,,0,0,0,,{text}\n"
+            )
+    return out
+
+
 def to_ass(
     words: list[Word],
     *,
@@ -83,12 +122,29 @@ def to_ass(
     outline: int = 8,
     shadow: int = 3,
     uppercase: bool = False,
+    highlight: bool = False,
+    hook: str | None = None,
+    hook_seconds: float = 3.0,
 ) -> str:
-    """Render word timings as a complete ASS subtitle document."""
+    """Render word timings as a complete ASS subtitle document.
+
+    highlight=True keeps a whole card on screen and colours the spoken word.
+    hook=... shows a boxed title card in the upper third for the first
+    `hook_seconds`, so the video reads even when muted.
+    """
     header = _HEADER.format(
-        width=width, height=height, font=font, size=size, outline=outline, shadow=shadow
+        width=width, height=height, font=font, size=size, outline=outline, shadow=shadow,
+        hook_size=max(int(size * 0.5), 40), hook_margin=int(height * 0.14),
     )
     lines = [header]
+    if hook:
+        lines.append(
+            f"Dialogue: 1,{format_time(0)},{format_time(hook_seconds)},Hook,,0,0,0,,"
+            f"{_escape(hook.strip())}\n"
+        )
+    if highlight:
+        lines.extend(karaoke_lines(words, per_card, uppercase=uppercase))
+        return "".join(lines)
     for start, end, text in group_words(words, per_card):
         if uppercase:
             text = text.upper()

@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import assemble, captions, prompts, timeline, tts
+from . import assemble, captions, music, procedural, prompts, timeline, tts
 from . import bank as bankmod
 
 DEFAULT_BANK = Path("bank")
@@ -18,6 +18,25 @@ DEFAULT_BANK = Path("bank")
 
 
 def cmd_bank(args: argparse.Namespace) -> int:
+    if args.procedural:
+        kinds = args.procedural.split(",")
+        unknown = [k for k in kinds if k not in procedural.GENERATORS]
+        if unknown:
+            print(f"error: unknown generators {unknown}. Valid: {', '.join(procedural.GENERATORS)}",
+                  file=sys.stderr)
+            return 2
+        bank = bankmod.Bank(args.dir)
+        per = args.per_category or 2
+        print(f"▶ Rendering {len(kinds) * per} procedural clips into {args.dir} "
+              f"({args.duration}s each)")
+        made = bankmod.add_procedural(
+            bank, kinds, per_kind=per, seconds=args.duration, seed_base=args.seed
+        )
+        for c in made:
+            print(f"  ✓ [{c.category}] {c.path.name} ({c.duration:.1f}s)")
+        print(f"\nBank now: {bank.categories()}")
+        return 0
+
     cats = args.categories.split(",") if args.categories else None
     try:
         plist = prompts.all_prompts(cats, per_category=args.per_category)
@@ -135,8 +154,12 @@ def cmd_make(args: argparse.Namespace) -> int:
 
     print(f"▶ Voice ({args.tts}) …")
     try:
-        provider = tts.get_provider(args.tts, voice_id=args.voice) if args.tts == "elevenlabs" \
-            else tts.get_provider(args.tts)
+        if args.tts == "elevenlabs":
+            provider = tts.get_provider(args.tts, voice_id=args.voice)
+        elif args.tts == "kokoro":
+            provider = tts.get_provider(args.tts, voice=args.voice, speed=args.speed)
+        else:
+            provider = tts.get_provider(args.tts)
         speech = provider.synthesize(text, workdir / "voice")
     except tts.TTSError as e:
         print(f"error: {e}", file=sys.stderr)
@@ -149,13 +172,35 @@ def cmd_make(args: argparse.Namespace) -> int:
     print(f"▶ Timeline: {len(segments)} cuts from {len({s.clip.id for s in segments})} clips")
 
     ass_path = workdir / "captions.ass"
+    hook = None
+    if args.hook_card:
+        hook = meta.get("title") or meta.get("hook")
     ass_path.write_text(
-        captions.to_ass(speech.words, per_card=args.words_per_card, uppercase=args.uppercase)
+        captions.to_ass(
+            speech.words,
+            per_card=args.words_per_card,
+            uppercase=args.uppercase,
+            highlight=args.highlight,
+            hook=hook,
+            hook_seconds=args.hook_seconds,
+            font=args.font,
+        )
     )
+
+    music_path: Path | None = None
+    if args.music == "auto":
+        music_path = music.write_wav(
+            workdir / "music.wav", music.ambient_pad(speech.duration + 2, seed=args.seed or 0)
+        )
+    elif args.music not in ("none", ""):
+        music_path = Path(args.music)
 
     print("▶ Rendering …")
     try:
-        assemble.render(segments, speech.audio_path, ass_path, out)
+        assemble.render(
+            segments, speech.audio_path, ass_path, out,
+            music_path=music_path, music_db=args.music_db,
+        )
     except assemble.RenderError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -186,6 +231,10 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--quality", default="basic", choices=["basic", "high"])
     b.add_argument("--concurrency", type=int, default=4)
     b.add_argument("--dry-run", action="store_true", help="print prompts, don't generate")
+    b.add_argument(
+        "--procedural", help=f"render locally instead: {','.join(procedural.GENERATORS)}"
+    )
+    b.add_argument("--seed", type=int, default=0, help="seed base for --procedural")
     b.set_defaults(func=cmd_bank)
 
     bl = sub.add_parser("bank-list", help="show what's in the bank")
@@ -212,9 +261,19 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--bank", type=Path, default=DEFAULT_BANK)
     m.add_argument("--categories", help="restrict backgrounds to these categories")
     m.add_argument("--tts", default="elevenlabs", choices=sorted(tts.PROVIDERS))
-    m.add_argument("--voice", help="ElevenLabs voice id (default: $ELEVENLABS_VOICE_ID)")
-    m.add_argument("--words-per-card", type=int, default=1)
+    m.add_argument("--voice", help="ElevenLabs voice id, or Kokoro voice name (e.g. am_michael)")
+    m.add_argument("--speed", type=float, default=1.0, help="Kokoro speech speed (1.0 = normal)")
+    m.add_argument("--words-per-card", type=int, default=3, help="3-5 is the genre norm")
     m.add_argument("--uppercase", action="store_true")
+    m.add_argument("--no-highlight", dest="highlight", action="store_false",
+                   help="plain cards instead of karaoke word highlight")
+    m.add_argument("--no-hook-card", dest="hook_card", action="store_false",
+                   help="skip the title card in the first seconds")
+    m.add_argument("--hook-seconds", type=float, default=3.0)
+    m.add_argument("--font", default="Arial")
+    m.add_argument("--music", default="auto",
+                   help="'auto' = procedural ambient bed, 'none', or a path to an audio file")
+    m.add_argument("--music-db", type=float, default=-18.0, help="bed level relative to voice")
     m.add_argument("--min-cut", type=float, default=2.0)
     m.add_argument("--max-cut", type=float, default=4.0)
     m.add_argument("--seed", type=int)
