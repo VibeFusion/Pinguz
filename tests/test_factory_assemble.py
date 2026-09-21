@@ -32,6 +32,7 @@ def test_build_command_layout(monkeypatch):
     assert cmd[cmd.index("-map") + 1] == "[vout]"
     assert "[2:a]loudnorm" in fc and "[aout]" in cmd  # narration is input 2, normalised
     assert "-r" in cmd and cmd[cmd.index("-r") + 1] == "30"
+    assert cmd[cmd.index("-t", cmd.index("-map")) + 1] == "5.000"  # capped at 3.0 + 2.0 s
     assert cmd[-1] == "out.mp4"
 
 

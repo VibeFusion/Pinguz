@@ -112,9 +112,13 @@ def build_command(
             f"{LOUDNORM},aresample=48000[aout]"
         )
 
+    # loudnorm buffers the whole audio stream, so -shortest fires late; cap the
+    # output at the planned video length explicitly.
+    total = sum(seg.duration for seg in segments)
     cmd += [
         "-filter_complex", ";".join(parts),
         "-map", "[vout]", "-map", "[aout]",
+        "-t", f"{total:.3f}",
         "-r", str(fps),
         "-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
