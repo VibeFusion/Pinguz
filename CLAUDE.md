@@ -43,7 +43,8 @@ src/factory/
   captions.py   — word timings → ASS subtitles
   timeline.py   — seeded cut planner (2–4 s cuts, no consecutive clip repeats)
   assemble.py   — ffmpeg render, 1080×1920 H.264/AAC
-  cli.py        — `factory bank | bank-list | ideas | script | make`
+  platforms.py  — per-platform limits/safe zones; `factory export` packaging
+  cli.py        — `factory bank | bank-import | bank-list | ideas | script | make | export`
 scripts/smoke_test.py
 tests/          — test_muapi, test_server, test_factory_*
 .claude/mcp.json, .claude/skills/
@@ -70,6 +71,7 @@ factory ideas "petty revenge at work" -n 10 --out ideas.json
 factory script "premise…" --style AITA --out script.json
 factory make --script script.json --out out/x.mp4 --seed 42
 factory make --text "raw narration" --tts stub --out out/test.mp4   # no keys needed
+factory export --video out/x.mp4 --script script.json          # per-platform folders
 ```
 
 `factory make` writes a sidecar `.json` recording every cut (clip id, offset, duration) so a
@@ -80,7 +82,12 @@ Design rules that matter for the format:
 - Background must never carry narrative: no faces, no text, continuous motion.
 - Stories are **original fiction** from the script agent — never scrape Reddit.
 - The script agent's retention structure (cold open, second hook ~15 s, payoff last,
-  130–170 words) lives in `story.SCRIPT_SYSTEM`. Change it there, not in the CLI.
+  120–140 words) lives in `story.SCRIPT_SYSTEM`. Change it there, not in the CLI.
+- Default ElevenLabs voice is premade **Adam** (`pNInz6obpgDQGcFmaJgB`): the narrator most
+  viral Reddit-story channels use and the user's pick. Override with `--voice` or
+  `ELEVENLABS_VOICE_ID`.
+- Platform limits (durations, caption/hashtag caps, safe zones) live in `platforms.PLATFORMS`;
+  `docs/PUBLISHING.md` has the upload-API notes per platform.
 
 ## The Five MCP Tools
 

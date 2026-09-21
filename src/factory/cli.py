@@ -242,6 +242,36 @@ def cmd_make(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    from . import platforms
+
+    video = Path(args.video)
+    if not video.exists():
+        print(f"error: {video} not found", file=sys.stderr)
+        return 2
+    meta_path = Path(args.meta) if args.meta else video.with_suffix(".json")
+    meta: dict = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    if args.script:
+        from . import story
+
+        meta.update(story.Script.load(Path(args.script)).model_dump())
+    if not meta:
+        print(f"warning: no metadata at {meta_path}; captions will be empty", file=sys.stderr)
+    keys = args.platforms.split(",") if args.platforms else None
+    out_dir = Path(args.out) if args.out else video.with_suffix("") / "export"
+    try:
+        results = platforms.export_all(video, meta, out_dir, platforms=keys)
+    except (ValueError, assemble.RenderError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    for ex in results:
+        flag = " (trimmed)" if ex.trimmed else ""
+        print(f"✓ {ex.platform:10s} {ex.seconds:5.1f}s{flag}  → {ex.video}")
+        for w in ex.warnings:
+            print(f"    ! {w}")
+    return 0
+
+
 # ── parser ───────────────────────────────────────────────────────────────────
 
 
@@ -312,6 +342,14 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--max-cut", type=float, default=4.0)
     m.add_argument("--seed", type=int)
     m.set_defaults(func=cmd_make)
+
+    e = sub.add_parser("export", help="package a rendered short for each platform")
+    e.add_argument("--video", required=True, help="master 9:16 mp4 from `factory make`")
+    e.add_argument("--meta", help="sidecar JSON (default: <video>.json)")
+    e.add_argument("--script", type=Path, help="script JSON to take title/hashtags from")
+    e.add_argument("--platforms", help="comma-separated subset, e.g. youtube,tiktok")
+    e.add_argument("--out", help="output dir (default: <video stem>/export)")
+    e.set_defaults(func=cmd_export)
     return p
 
 

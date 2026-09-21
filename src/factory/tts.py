@@ -21,7 +21,9 @@ import httpx
 import numpy as np
 
 ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
-DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs premade "Rachel"
+# ElevenLabs premade "Adam": the narrator most viral Reddit-story channels use, and the
+# voice the user picked over Sarah/Liam in listening tests. Rachel is 21m00Tcm4TlvDq8ikWAM.
+DEFAULT_VOICE_ID = "pNInz6obpgDQGcFmaJgB"
 DEFAULT_MODEL_ID = "eleven_multilingual_v2"
 
 
