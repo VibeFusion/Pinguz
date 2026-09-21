@@ -196,3 +196,30 @@ def add_procedural(
             bank.add(clip)
             made.append(clip)
     return made
+
+
+async def add_remote(
+    bank: Bank,
+    url: str,
+    *,
+    category: str,
+    prompt: str = "",
+    model: str = "remote",
+    request_id: str = "",
+) -> Clip:
+    """Download an already-generated clip (any HTTPS URL) into the bank."""
+    clip_id = uuid.uuid4().hex[:8]
+    bank.dir.mkdir(parents=True, exist_ok=True)
+    dest = bank.dir / f"{category}-{clip_id}.mp4"
+    await _download(url, dest)
+    clip = Clip(
+        id=clip_id,
+        path=dest,
+        category=category,
+        prompt=prompt,
+        duration=await asyncio.to_thread(assemble.probe_duration, dest),
+        model=model,
+        request_id=request_id,
+    )
+    bank.add(clip)
+    return clip

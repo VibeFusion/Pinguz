@@ -74,6 +74,33 @@ def cmd_bank(args: argparse.Namespace) -> int:
     return 1 if failed and not done else 0
 
 
+def cmd_bank_import(args: argparse.Namespace) -> int:
+    """Pull clips generated elsewhere (Higgsfield, a browser session…) into the bank."""
+    bank = bankmod.Bank(args.dir)
+    items = json.loads(Path(args.manifest).read_text()) if args.manifest else []
+    for url in args.url or []:
+        items.append({"url": url, "category": args.category or "imported"})
+    if not items:
+        print("error: pass --manifest FILE (list of {url, category, prompt?, model?}) or --url",
+              file=sys.stderr)
+        return 2
+
+    async def run() -> list[bankmod.Clip]:
+        out = []
+        for it in items:
+            clip = await bankmod.add_remote(
+                bank, it["url"], category=it["category"], prompt=it.get("prompt", ""),
+                model=it.get("model", "remote"), request_id=it.get("request_id", ""),
+            )
+            print(f"  ✓ [{clip.category}] {clip.path.name} ({clip.duration:.1f}s)")
+            out.append(clip)
+        return out
+
+    made = asyncio.run(run())
+    print(f"\n{len(made)} imported. Bank now: {bank.categories()}")
+    return 0
+
+
 def cmd_bank_list(args: argparse.Namespace) -> int:
     bank = bankmod.Bank(args.dir)
     clips = bank.clips()
@@ -236,6 +263,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     b.add_argument("--seed", type=int, default=0, help="seed base for --procedural")
     b.set_defaults(func=cmd_bank)
+
+    bi = sub.add_parser("bank-import", help="download already-generated clips into the bank")
+    bi.add_argument("--dir", type=Path, default=DEFAULT_BANK)
+    bi.add_argument("--manifest", help="JSON list of {url, category, prompt, model}")
+    bi.add_argument("--url", action="append", help="one clip URL (repeatable)")
+    bi.add_argument("--category", help="category for --url clips")
+    bi.set_defaults(func=cmd_bank_import)
 
     bl = sub.add_parser("bank-list", help="show what's in the bank")
     bl.add_argument("--dir", type=Path, default=DEFAULT_BANK)

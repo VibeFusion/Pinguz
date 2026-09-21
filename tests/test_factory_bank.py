@@ -47,3 +47,18 @@ def test_generate_with_mocked_muapi(tmp_path, monkeypatch):
     assert done[0].duration == 10.0 and done[0].path.exists()
     assert len(failed) == 1 and failed[0][0].category == "sand"
     assert bankmod.Bank(tmp_path / "bank").categories() == {"soap": 1}
+
+
+def test_add_remote_downloads_and_registers(tmp_path, monkeypatch):
+    async def fake_download(url, dest: Path):
+        assert url == "https://x/clip.mp4"
+        dest.write_bytes(b"\x00")
+
+    monkeypatch.setattr(bankmod, "_download", fake_download)
+    monkeypatch.setattr(bankmod.assemble, "probe_duration", lambda p: 8.0)
+    b = bankmod.Bank(tmp_path / "bank")
+    clip = asyncio.run(
+        bankmod.add_remote(b, "https://x/clip.mp4", category="soap-cutting", model="seedance1_5")
+    )
+    assert clip.category == "soap-cutting" and clip.duration == 8.0 and clip.path.exists()
+    assert bankmod.Bank(tmp_path / "bank").categories() == {"soap-cutting": 1}
