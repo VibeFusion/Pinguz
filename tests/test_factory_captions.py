@@ -63,3 +63,12 @@ def test_hook_card_and_highlight_in_to_ass():
     assert "Style: Hook," in ass
     assert "Dialogue: 1,0:00:00.00,0:00:02.50,Hook,,0,0,0,,Big (title)" in ass
     assert "{\\1c&H00FFFF&}hi{\\r}" in ass
+
+
+def test_hook_card_boxless_style():
+    ass = captions.to_ass([Word("hi", 0.0, 0.4)], hook="T", hook_box=False)
+    style = next(ln for ln in ass.splitlines() if ln.startswith("Style: Hook,"))
+    assert ",1,6,0,8,80,80," in style  # BorderStyle 1, outline 6
+    boxed = captions.to_ass([Word("hi", 0.0, 0.4)], hook="T")
+    boxed_style = next(ln for ln in boxed.splitlines() if ln.startswith("Style: Hook,"))
+    assert ",3,14,0,8,80,80," in boxed_style
