@@ -6,8 +6,10 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .timeline import Segment
+if TYPE_CHECKING:  # only for annotations — avoids the timeline → bank → assemble cycle
+    from .timeline import Segment
 
 _DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 
