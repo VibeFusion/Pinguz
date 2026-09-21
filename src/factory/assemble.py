@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -144,6 +145,8 @@ def render(
     **kwargs: int | str | float | Path | None,
 ) -> Path:
     """Run ffmpeg and return the output path. Raises RenderError on failure."""
+    # ffmpeg runs in the ASS file's directory, so every other path must be absolute.
+    segments = [replace(s, clip=replace(s.clip, path=s.clip.path.resolve())) for s in segments]
     audio_path = audio_path.resolve()
     ass_path = ass_path.resolve()
     out_path = out_path.resolve()
