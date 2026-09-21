@@ -12,7 +12,7 @@ import httpx
 
 from pinguz import muapi
 
-from . import assemble
+from . import assemble, procedural
 from .prompts import ClipPrompt
 
 MANIFEST = "manifest.json"
@@ -162,3 +162,64 @@ async def generate(
 
     await asyncio.gather(*(worker(cp) for cp in prompts))
     return done, failed
+
+
+def add_procedural(
+    bank: Bank,
+    kinds: list[str],
+    *,
+    per_kind: int = 2,
+    seconds: float = 10.0,
+    seed_base: int = 0,
+    width: int = 540,
+    height: int = 960,
+) -> list[Clip]:
+    """Render procedural clips straight into the bank — no API, no credits."""
+    made: list[Clip] = []
+    for kind in kinds:
+        for i in range(per_kind):
+            seed = seed_base + i
+            bank.dir.mkdir(parents=True, exist_ok=True)
+            dest = bank.dir / f"proc-{kind}-{seed}.mp4"
+            procedural.render_clip(
+                kind, dest, seconds=seconds, seed=seed, width=width, height=height
+            )
+            clip = Clip(
+                id=f"{kind}{seed}",
+                path=dest,
+                category=f"proc-{kind}",
+                prompt=f"procedural {kind} seed={seed}",
+                duration=assemble.probe_duration(dest),
+                model="procedural",
+                request_id="",
+            )
+            bank.add(clip)
+            made.append(clip)
+    return made
+
+
+async def add_remote(
+    bank: Bank,
+    url: str,
+    *,
+    category: str,
+    prompt: str = "",
+    model: str = "remote",
+    request_id: str = "",
+) -> Clip:
+    """Download an already-generated clip (any HTTPS URL) into the bank."""
+    clip_id = uuid.uuid4().hex[:8]
+    bank.dir.mkdir(parents=True, exist_ok=True)
+    dest = bank.dir / f"{category}-{clip_id}.mp4"
+    await _download(url, dest)
+    clip = Clip(
+        id=clip_id,
+        path=dest,
+        category=category,
+        prompt=prompt,
+        duration=await asyncio.to_thread(assemble.probe_duration, dest),
+        model=model,
+        request_id=request_id,
+    )
+    bank.add(clip)
+    return clip

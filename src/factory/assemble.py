@@ -6,8 +6,10 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .timeline import Segment
+if TYPE_CHECKING:  # only for annotations — avoids the timeline → bank → assemble cycle
+    from .timeline import Segment
 
 _DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 
@@ -46,6 +48,10 @@ def probe_duration(path: Path) -> float:
     return parse_duration(r.stderr)
 
 
+# Broadcast-ish loudness for speech-led shorts; platforms normalise to about here anyway.
+LOUDNORM = "loudnorm=I=-16:TP=-1.5:LRA=11"
+
+
 def build_command(
     segments: list[Segment],
     audio_path: Path,
@@ -57,11 +63,16 @@ def build_command(
     fps: int = 30,
     crf: int = 20,
     preset: str = "medium",
+    music_path: Path | None = None,
+    music_db: float = -18.0,
 ) -> list[str]:
     """Build the ffmpeg argv.
 
     `ass_name` must be a bare filename in the working directory the command is
     run from — that sidesteps filtergraph path escaping entirely.
+
+    With `music_path`, the bed is looped under the narration at `music_db`,
+    side-chain ducked by the voice, then the mix is loudness-normalised.
     """
     if not segments:
         raise RenderError("No segments to render")
@@ -73,6 +84,10 @@ def build_command(
         cmd += ["-ss", f"{seg.start:.3f}", "-t", f"{seg.duration:.3f}", "-i", str(seg.clip.path)]
     cmd += ["-i", str(audio_path)]
     audio_index = len(segments)
+    music_index = None
+    if music_path is not None:
+        cmd += ["-stream_loop", "-1", "-i", str(music_path)]
+        music_index = audio_index + 1
 
     parts: list[str] = []
     for i in range(len(segments)):
@@ -84,9 +99,23 @@ def build_command(
     parts.append(f"{inputs}concat=n={len(segments)}:v=1:a=0[vc]")
     parts.append(f"[vc]ass={ass_name}[vout]")
 
+    if music_index is None:
+        parts.append(f"[{audio_index}:a]{LOUDNORM},aresample=48000[aout]")
+    else:
+        parts.append(f"[{audio_index}:a]asplit=2[nar][sc]")
+        parts.append(f"[{music_index}:a]volume={music_db}dB[mus]")
+        parts.append(
+            "[mus][sc]sidechaincompress=threshold=0.02:ratio=10:attack=50:release=500[duck]"
+        )
+        parts.append(
+            f"[nar][duck]amix=inputs=2:duration=first:dropout_transition=0,"
+            f"{LOUDNORM},aresample=48000[aout]"
+        )
+
     cmd += [
         "-filter_complex", ";".join(parts),
-        "-map", "[vout]", "-map", f"{audio_index}:a",
+        "-map", "[vout]", "-map", "[aout]",
+        "-r", str(fps),
         "-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
         "-shortest", "-movflags", "+faststart",
@@ -100,13 +129,15 @@ def render(
     audio_path: Path,
     ass_path: Path,
     out_path: Path,
-    **kwargs: int | str,
+    **kwargs: int | str | float | Path | None,
 ) -> Path:
     """Run ffmpeg and return the output path. Raises RenderError on failure."""
     audio_path = audio_path.resolve()
     ass_path = ass_path.resolve()
     out_path = out_path.resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    if kwargs.get("music_path") is not None:
+        kwargs["music_path"] = Path(str(kwargs["music_path"])).resolve()
     cmd = build_command(segments, audio_path, ass_path.name, out_path, **kwargs)  # type: ignore[arg-type]
     r = subprocess.run(cmd, cwd=ass_path.parent, capture_output=True, text=True)
     if r.returncode != 0:

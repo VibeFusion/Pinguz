@@ -6,6 +6,7 @@ import base64
 import wave
 
 import httpx
+import numpy as np
 import pytest
 import respx
 
@@ -80,3 +81,35 @@ def test_elevenlabs_requires_key(tmp_path, monkeypatch):
 def test_get_provider_unknown():
     with pytest.raises(tts.TTSError, match="Unknown TTS provider"):
         tts.get_provider("nope")
+
+
+def test_split_sentences():
+    assert tts.split_sentences("One. Two! Three? Four") == ["One.", "Two!", "Three?", "Four"]
+
+
+def test_spread_words_is_monotonic_and_fills_span():
+    words = tts.spread_words("I quit my job today.", 2.0, 4.0)
+    assert [w.text for w in words] == ["I", "quit", "my", "job", "today."]
+    assert words[0].start == 2.0 and words[-1].end == pytest.approx(3.98, abs=1e-6)
+    for a, b in zip(words, words[1:]):
+        assert a.end <= b.start
+    assert words[1].end - words[1].start > words[0].end - words[0].start  # longer word, longer slot
+
+
+def test_speech_bounds_trims_silence():
+    sr = 1000
+    x = np.zeros(3000, dtype=np.float32)
+    x[500:2500] = 0.5
+    on, off = tts.speech_bounds(x, sr)
+    assert on == pytest.approx(0.5) and off == pytest.approx(2.5)
+    assert tts.speech_bounds(np.zeros(10, dtype=np.float32), sr) == (0.0, 0.01)
+
+
+def test_kokoro_requires_package(monkeypatch):
+    import importlib
+    def boom(name):
+        raise ImportError(name)
+
+    monkeypatch.setattr(importlib, "import_module", boom)
+    with pytest.raises(tts.TTSError, match="kokoro-onnx not installed"):
+        tts.Kokoro()._load()

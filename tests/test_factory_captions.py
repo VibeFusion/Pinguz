@@ -39,3 +39,27 @@ def test_to_ass_structure_and_escaping():
     assert len(lines) == 2
     assert lines[0].endswith(",HI(THERE)")  # braces neutralised, uppercase applied
     assert lines[0].startswith("Dialogue: 0,0:00:00.00,0:00:00.40,Word")
+
+
+def test_karaoke_highlights_current_word_and_keeps_card():
+    words = [
+        Word("one", 0.0, 0.3),
+        Word("two", 0.4, 0.7),
+        Word("three", 0.8, 1.1),
+        Word("four", 1.2, 1.5),
+    ]
+    lines = captions.karaoke_lines(words, per_card=3)
+    assert len(lines) == 4  # one Dialogue per spoken word
+    assert lines[0].endswith(",{\\1c&H00FFFF&}one{\\r} two three\n")
+    assert lines[1].endswith(",one {\\1c&H00FFFF&}two{\\r} three\n")
+    assert lines[3].endswith(",{\\1c&H00FFFF&}four{\\r}\n")
+    # card 1 word 3 ends where card 2 begins, no gap
+    assert "0:00:00.80,0:00:01.20" in lines[2]
+
+
+def test_hook_card_and_highlight_in_to_ass():
+    words = [Word("hi", 0.0, 0.4)]
+    ass = captions.to_ass(words, hook="Big {title}", hook_seconds=2.5, highlight=True)
+    assert "Style: Hook," in ass
+    assert "Dialogue: 1,0:00:00.00,0:00:02.50,Hook,,0,0,0,,Big (title)" in ass
+    assert "{\\1c&H00FFFF&}hi{\\r}" in ass
