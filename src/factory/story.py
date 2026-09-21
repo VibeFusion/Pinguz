@@ -41,7 +41,8 @@ class Script(BaseModel):
     narration: str = Field(
         description=(
             "Full spoken script including the hook. First person, past tense, plain "
-            "conversational English, 130-170 words, ends on the payoff line"
+            "conversational English, 120-140 words, ends on a question to the viewer "
+            "or a withheld reveal — never a moral"
         )
     )
     hashtags: list[str] = Field(description="3-5 hashtags without the # symbol")
@@ -49,6 +50,21 @@ class Script(BaseModel):
     @property
     def word_count(self) -> int:
         return len(self.narration.split())
+
+    def lint(self) -> list[str]:
+        """Cheap structural checks a script must pass before it is voiced."""
+        problems: list[str] = []
+        n = self.word_count
+        if not 110 <= n <= 150:
+            problems.append(f"{n} words (want 120-140)")
+        first = self.narration.strip().split(".")[0].lower()
+        if first.startswith(("so ", "so,", "story time", "okay so", "this happened")):
+            problems.append("opens with preamble instead of the hook")
+        tail = self.narration.strip().lower()
+        withheld = ("worst part.", "part two.", "part 2.", "what happened next.")
+        if not (tail.endswith("?") or tail.endswith(withheld)):
+            problems.append("does not end on a question or a withheld reveal")
+        return problems
 
     def save(self, path: Path) -> None:
         path.write_text(self.model_dump_json(indent=2))
@@ -78,19 +94,26 @@ popular Reddit story channels. The audio is the whole show: it plays over unrela
 "oddly satisfying" background footage with word-by-word captions.
 
 Retention rules — these are what make the format work:
-- Cold open. The first sentence IS the hook: a shocking claim, a confession, or an
-  impossible situation stated flatly. No "so", no "story time", no context first.
+- Cold open. The first sentence IS the hook: the single most shocking, specific
+  line of the story, stated flatly in first person. A concrete detail (a number,
+  a relationship, an object) beats an adjective. No "so", no "story time", no
+  context first. Cut the backstory; get to the drama.
 - A second hook around 15 seconds in: a twist, a reveal, or an escalation.
-- Withhold the payoff until the final sentence. The last line resolves the tension
-  and lands as a punchline or a gut-punch.
+- Withhold the payoff until the final sentences. Then END ON ENGAGEMENT: either a
+  direct question to the viewer ("So. Was I wrong?") or a withheld reveal
+  ("And that's not even the worst part."). Never a moral, a summary, or a
+  lesson — nothing that lets the viewer feel finished before they comment.
 - Plain spoken English, first person, past tense, short sentences. Read-aloud ready:
   no emojis, no markdown, no bracketed asides, no character names longer than one
   word, numbers written as words.
-- 130-170 words. Every sentence advances the story; cut anything that doesn't.
+- 120-140 words. That is a hard ceiling: at ~170 words per minute it lands at
+  45-50 seconds. Every sentence advances the conflict; cut anything that doesn't.
 
 The story is original fiction you invent. It must not reproduce or closely
 paraphrase any real post. Keep it PG-13: no slurs, no graphic violence, no
-sexual content, nothing that targets a real person or a protected group.
+sexual content, nothing that targets a real person or a protected group. Avoid
+templated distress ("same situation, same outcome") — each story needs a
+premise, an escalation and an ending that are genuinely its own.
 """
 
 IDEAS_SYSTEM = """\
