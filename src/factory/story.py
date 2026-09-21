@@ -32,6 +32,17 @@ class ScriptError(Exception):
     """Raised when the model refuses or returns an unusable script."""
 
 
+# Word budgets per target length. ElevenLabs Adam reads ~160 words per minute, so
+# "short" lands at 45-50 s (Shorts/Reels sweet spot) and "long" clears the 60 s floor
+# TikTok's Creator Rewards program requires.
+LENGTHS: dict[str, tuple[int, int, str]] = {
+    "short": (120, 140, "45-50 seconds"),
+    "long": (175, 200, "65-75 seconds"),
+}
+DEFAULT_LENGTH = "short"
+_LINT_SLACK = 10  # words either side of the budget before lint complains
+
+
 class Script(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -46,17 +57,26 @@ class Script(BaseModel):
         )
     )
     hashtags: list[str] = Field(description="3-5 hashtags without the # symbol")
+    verdict: str = Field(
+        default="",
+        description=(
+            "The channel host's own one-line take on the story, 6-14 words, first person, "
+            "opinionated, e.g. 'Ask him. Anyone who plans that far ahead is a keeper.' Shown "
+            "as an end card after the narration; never spoken by the narrator"
+        ),
+    )
 
     @property
     def word_count(self) -> int:
         return len(self.narration.split())
 
-    def lint(self) -> list[str]:
+    def lint(self, length: str = DEFAULT_LENGTH) -> list[str]:
         """Cheap structural checks a script must pass before it is voiced."""
         problems: list[str] = []
+        lo, hi, _ = LENGTHS[length]
         n = self.word_count
-        if not 110 <= n <= 150:
-            problems.append(f"{n} words (want 120-140)")
+        if not lo - _LINT_SLACK <= n <= hi + _LINT_SLACK:
+            problems.append(f"{n} words (want {lo}-{hi})")
         first = self.narration.strip().split(".")[0].lower()
         if first.startswith(("so ", "so,", "story time", "okay so", "this happened")):
             problems.append("opens with preamble instead of the hook")
@@ -88,8 +108,8 @@ class IdeaList(BaseModel):
     ideas: list[Idea]
 
 
-SCRIPT_SYSTEM = """\
-You write narration scripts for 45-60 second vertical story videos in the style of
+_SCRIPT_SYSTEM_TEMPLATE = """\
+You write narration scripts for {seconds} vertical story videos in the style of
 popular Reddit story channels. The audio is the whole show: it plays over unrelated
 "oddly satisfying" background footage with word-by-word captions.
 
@@ -106,8 +126,12 @@ Retention rules — these are what make the format work:
 - Plain spoken English, first person, past tense, short sentences. Read-aloud ready:
   no emojis, no markdown, no bracketed asides, no character names longer than one
   word, numbers written as words.
-- 120-140 words. That is a hard ceiling: at ~170 words per minute it lands at
-  45-50 seconds. Every sentence advances the conflict; cut anything that doesn't.
+- {lo}-{hi} words. That is a hard ceiling: at ~160 words per minute it lands at
+  {seconds}. Every sentence advances the conflict; cut anything that doesn't.
+{extra}
+Also give a `verdict`: the channel host's own one-line reaction to the story
+(6-14 words, first person, an actual opinion). It is shown as an end card, not
+spoken, so it must not repeat the closing question.
 
 The story is original fiction you invent. It must not reproduce or closely
 paraphrase any real post. Keep it PG-13: no slurs, no graphic violence, no
@@ -115,6 +139,24 @@ sexual content, nothing that targets a real person or a protected group. Avoid
 templated distress ("same situation, same outcome") — each story needs a
 premise, an escalation and an ending that are genuinely its own.
 """
+
+_LONG_EXTRA = """\
+- For this length the second hook lands around 15 seconds AND a third escalation
+  around 40 seconds; the extra words buy one more turn of the screw, never more
+  backstory.
+"""
+
+
+def script_system(length: str = DEFAULT_LENGTH) -> str:
+    """The script agent's system prompt for a target length ("short" or "long")."""
+    if length not in LENGTHS:
+        raise ValueError(f"length must be one of {', '.join(LENGTHS)}")
+    lo, hi, seconds = LENGTHS[length]
+    extra = _LONG_EXTRA if length == "long" else ""
+    return _SCRIPT_SYSTEM_TEMPLATE.format(lo=lo, hi=hi, seconds=seconds, extra=extra)
+
+
+SCRIPT_SYSTEM = script_system(DEFAULT_LENGTH)
 
 IDEAS_SYSTEM = """\
 You generate premises for original 45-60 second Reddit-style story videos. Each
@@ -142,10 +184,16 @@ def write_script(
     idea: str,
     *,
     style: str | None = None,
+    length: str = DEFAULT_LENGTH,
     client: anthropic.Anthropic | None = None,
     model: str = MODEL,
 ) -> Script:
-    """Turn a premise (or a rough draft) into a finished Script."""
+    """Turn a premise (or a rough draft) into a finished Script.
+
+    `length` picks the word budget from LENGTHS: "short" for Shorts/Reels, "long"
+    for a TikTok cut that clears the 60 s monetisation floor.
+    """
+    system = script_system(length)
     client = client or _client()
     if style:
         style_line = f"Style: {style}\n"
@@ -154,7 +202,7 @@ def write_script(
     response = client.beta.messages.parse(
         model=model,
         max_tokens=4096,
-        system=SCRIPT_SYSTEM,
+        system=system,
         messages=[{"role": "user", "content": f"{style_line}Premise or draft:\n{idea}"}],
         output_format=Script,
         output_config={"effort": "medium"},

@@ -72,3 +72,11 @@ def test_hook_card_boxless_style():
     boxed = captions.to_ass([Word("hi", 0.0, 0.4)], hook="T")
     boxed_style = next(ln for ln in boxed.splitlines() if ln.startswith("Style: Hook,"))
     assert ",3,14,0,8,80,80," in boxed_style
+
+
+def test_outro_verdict_card_after_narration():
+    words = [Word("hi", 0.0, 0.4), Word("there", 0.4, 0.8)]
+    ass = captions.to_ass(words, hook="T", outro="MY TAKE: ask him", outro_start=0.8,
+                          outro_seconds=2.5, highlight=True)
+    assert "Dialogue: 1,0:00:00.80,0:00:03.30,Hook,,0,0,0,,MY TAKE: ask him" in ass
+    assert ass.count("Hook,,0,0,0,,") == 2  # title card + verdict card

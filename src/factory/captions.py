@@ -126,13 +126,18 @@ def to_ass(
     hook: str | None = None,
     hook_seconds: float = 3.0,
     hook_box: bool = True,
+    outro: str | None = None,
+    outro_start: float = 0.0,
+    outro_seconds: float = 3.0,
 ) -> str:
     """Render word timings as a complete ASS subtitle document.
 
     highlight=True keeps a whole card on screen and colours the spoken word.
     hook=... shows a title card in the upper third for the first `hook_seconds`,
     so the video reads even when muted; hook_box=False draws it as outlined text
-    over the footage instead of on an opaque box.
+    over the footage instead of on an opaque box. outro=... shows a second card
+    (the creator's verdict) from `outro_start` for `outro_seconds`, after the
+    narration ends — the creator-perspective layer platforms now reward.
     """
     header = _HEADER.format(
         width=width, height=height, font=font, size=size, outline=outline, shadow=shadow,
@@ -145,6 +150,12 @@ def to_ass(
         lines.append(
             f"Dialogue: 1,{format_time(0)},{format_time(hook_seconds)},Hook,,0,0,0,,"
             f"{_escape(hook.strip())}\n"
+        )
+    if outro:
+        lines.append(
+            f"Dialogue: 1,{format_time(outro_start)},"
+            f"{format_time(outro_start + outro_seconds)},Hook,,0,0,0,,"
+            f"{_escape(outro.strip())}\n"
         )
     if highlight:
         lines.extend(karaoke_lines(words, per_card, uppercase=uppercase))

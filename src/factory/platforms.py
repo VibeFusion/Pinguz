@@ -141,8 +141,9 @@ def build_caption(meta: dict, platform: Platform) -> tuple[str, str, list[str]]:
         body = str(meta.get("narration") or "").strip()
         return _clip_text(title, platform.title_max), body, []
 
+    verdict = str(meta.get("verdict") or "").strip()
     cta = "Full story in the video. What would you do?"
-    parts = [hook, cta, tag_line]
+    parts = [hook, f"My take: {verdict}" if verdict else "", cta, tag_line]
     caption = "\n\n".join(p for p in parts if p)
     return _clip_text(title, platform.title_max), _clip_text(caption, platform.caption_max), tags
 

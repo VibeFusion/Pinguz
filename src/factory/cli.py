@@ -17,6 +17,11 @@ DEFAULT_BANK = Path("bank")
 # ── bank ─────────────────────────────────────────────────────────────────────
 
 
+def story_lengths() -> list[str]:
+    # Kept lazy: story imports anthropic, which `make --tts stub` never needs.
+    return ["short", "long"]
+
+
 def cmd_bank(args: argparse.Namespace) -> int:
     if args.procedural:
         kinds = args.procedural.split(",")
@@ -138,12 +143,16 @@ def cmd_script(args: argparse.Namespace) -> int:
 
     idea = args.idea if args.idea else sys.stdin.read()
     try:
-        script = story.write_script(idea, style=args.style)
-    except story.ScriptError as e:
+        script = story.write_script(idea, style=args.style, length=args.length)
+    except (story.ScriptError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     print(f"# {script.title}  [{script.style}]  ({script.word_count} words)\n")
     print(script.narration)
+    if script.verdict:
+        print(f"\nVerdict card: {script.verdict}")
+    for problem in script.lint(args.length):
+        print(f"! lint: {problem}", file=sys.stderr)
     print("\n" + " ".join(f"#{h}" for h in script.hashtags))
     if args.out:
         script.save(args.out)
@@ -193,8 +202,10 @@ def cmd_make(args: argparse.Namespace) -> int:
         return 1
     print(f"  {len(speech.words)} words, {speech.duration:.1f}s")
 
+    verdict = str(meta.get("verdict") or "").strip() if args.verdict_card else ""
+    total = speech.duration + (args.verdict_seconds if verdict else 0.0)
     segments = timeline.plan(
-        clips, speech.duration, min_cut=args.min_cut, max_cut=args.max_cut, seed=args.seed
+        clips, total, min_cut=args.min_cut, max_cut=args.max_cut, seed=args.seed
     )
     print(f"▶ Timeline: {len(segments)} cuts from {len({s.clip.id for s in segments})} clips")
 
@@ -211,13 +222,16 @@ def cmd_make(args: argparse.Namespace) -> int:
             hook=hook,
             hook_seconds=args.hook_seconds,
             font=args.font,
+            outro=f"MY TAKE: {verdict}" if verdict else None,
+            outro_start=speech.duration,
+            outro_seconds=args.verdict_seconds,
         )
     )
 
     music_path: Path | None = None
     if args.music == "auto":
         music_path = music.write_wav(
-            workdir / "music.wav", music.ambient_pad(speech.duration + 2, seed=args.seed or 0)
+            workdir / "music.wav", music.ambient_pad(total + 2, seed=args.seed or 0)
         )
     elif args.music not in ("none", ""):
         music_path = Path(args.music)
@@ -226,7 +240,7 @@ def cmd_make(args: argparse.Namespace) -> int:
     try:
         assemble.render(
             segments, speech.audio_path, ass_path, out,
-            music_path=music_path, music_db=args.music_db,
+            music_path=music_path, music_db=args.music_db, total=total,
         )
     except assemble.RenderError as e:
         print(f"error: {e}", file=sys.stderr)
@@ -236,9 +250,10 @@ def cmd_make(args: argparse.Namespace) -> int:
         {"clip": s.clip.id, "category": s.clip.category, "start": s.start, "duration": s.duration}
         for s in segments
     ]
-    meta["duration"] = speech.duration
+    meta["duration"] = total
+    meta["narration_seconds"] = speech.duration
     out.with_suffix(".json").write_text(json.dumps(meta, indent=2))
-    print(f"✓ {out}  ({speech.duration:.1f}s)  metadata → {out.with_suffix('.json')}")
+    print(f"✓ {out}  ({total:.1f}s)  metadata → {out.with_suffix('.json')}")
     return 0
 
 
@@ -314,6 +329,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("script", help="turn a premise into a script (reads stdin if omitted)")
     s.add_argument("idea", nargs="?")
     s.add_argument("--style", choices=None, help="e.g. AITA, TIFU, 'petty revenge'")
+    s.add_argument("--length", default="short", choices=sorted(story_lengths()),
+                   help="short ≈ 45-50 s (Shorts/Reels); long ≈ 65-75 s (TikTok ≥ 60 s floor)")
     s.add_argument("--out", type=Path)
     s.set_defaults(func=cmd_script)
 
@@ -334,6 +351,9 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--no-hook-card", dest="hook_card", action="store_false",
                    help="skip the title card in the first seconds")
     m.add_argument("--hook-seconds", type=float, default=3.0)
+    m.add_argument("--no-verdict-card", dest="verdict_card", action="store_false",
+                   help="skip the creator-verdict end card even if the script has one")
+    m.add_argument("--verdict-seconds", type=float, default=3.0)
     m.add_argument("--font", default="Arial")
     m.add_argument("--music", default="auto",
                    help="'auto' = procedural ambient bed, 'none', or a path to an audio file")

@@ -95,3 +95,11 @@ def test_export_all_rejects_unknown_platform(tmp_path: Path) -> None:
     video.write_bytes(b"\x00")
     with pytest.raises(ValueError, match="unknown platform"):
         platforms.export_all(video, META, tmp_path, platforms=["myspace"], seconds=10.0)
+
+
+def test_verdict_lands_in_caption():
+    meta = dict(META, verdict="Ask him. Planners like that are keepers.")
+    _, caption, _ = platforms.build_caption(meta, platforms.PLATFORMS["youtube"])
+    assert "My take: Ask him." in caption
+    _, body, _ = platforms.build_caption(meta, platforms.PLATFORMS["reddit"])
+    assert "My take" not in body  # Reddit post is the narration itself
