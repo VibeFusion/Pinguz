@@ -1,0 +1,10 @@
+[
+ {"id":"c0","category":"soap-cutting","uid":"349f55e5-72e6-4174-85ed-021354355db7"},
+ {"id":"c1","category":"kinetic-sand","uid":"4c8c1ec6-e5fd-499e-9e74-0fc170008559"},
+ {"id":"c2","category":"hydraulic-press","uid":"a4444d8b-8c64-4dfc-8e5b-a68c70447401"},
+ {"id":"c3","category":"slime","uid":"54c74b14-f14a-4baa-b610-f1e81c7c152c"},
+ {"id":"c4","category":"food-processing","uid":"6b8a19b8-86fd-4fbb-ad71-1a50ca6b0bf5"},
+ {"id":"c5","category":"wood-splitting","uid":"0c0952bc-9e8f-4fdb-9d0f-34e1745a122c"},
+ {"id":"c6","category":"marble-run","uid":"30460492-56c6-41dc-a3cf-54b9b32f629f"},
+ {"id":"c7","category":"paint-mixing","uid":"25ac6805-1a17-4443-905a-24f75bfd59c0"}
+]

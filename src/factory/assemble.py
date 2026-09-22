@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -65,6 +66,7 @@ def build_command(
     preset: str = "medium",
     music_path: Path | None = None,
     music_db: float = -18.0,
+    total: float | None = None,
 ) -> list[str]:
     """Build the ffmpeg argv.
 
@@ -73,6 +75,10 @@ def build_command(
 
     With `music_path`, the bed is looped under the narration at `music_db`,
     side-chain ducked by the voice, then the mix is loudness-normalised.
+
+    `total` overrides the output length (default: the segments' sum). When it is
+    longer than the narration the voice track is padded with silence so the music
+    bed keeps playing under an end card.
     """
     if not segments:
         raise RenderError("No segments to render")
@@ -99,10 +105,14 @@ def build_command(
     parts.append(f"{inputs}concat=n={len(segments)}:v=1:a=0[vc]")
     parts.append(f"[vc]ass={ass_name}[vout]")
 
+    length = total if total is not None else sum(seg.duration for seg in segments)
+    if length <= 0:
+        raise RenderError("total must be positive")
+    pad = f"apad=whole_dur={length:.3f}"
     if music_index is None:
-        parts.append(f"[{audio_index}:a]{LOUDNORM},aresample=48000[aout]")
+        parts.append(f"[{audio_index}:a]{pad},{LOUDNORM},aresample=48000[aout]")
     else:
-        parts.append(f"[{audio_index}:a]asplit=2[nar][sc]")
+        parts.append(f"[{audio_index}:a]{pad},asplit=2[nar][sc]")
         parts.append(f"[{music_index}:a]volume={music_db}dB[mus]")
         parts.append(
             "[mus][sc]sidechaincompress=threshold=0.02:ratio=10:attack=50:release=500[duck]"
@@ -112,9 +122,12 @@ def build_command(
             f"{LOUDNORM},aresample=48000[aout]"
         )
 
+    # loudnorm buffers the whole audio stream, so -shortest fires late; cap the
+    # output at the planned video length explicitly.
     cmd += [
         "-filter_complex", ";".join(parts),
         "-map", "[vout]", "-map", "[aout]",
+        "-t", f"{length:.3f}",
         "-r", str(fps),
         "-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
@@ -132,6 +145,8 @@ def render(
     **kwargs: int | str | float | Path | None,
 ) -> Path:
     """Run ffmpeg and return the output path. Raises RenderError on failure."""
+    # ffmpeg runs in the ASS file's directory, so every other path must be absolute.
+    segments = [replace(s, clip=replace(s.clip, path=s.clip.path.resolve())) for s in segments]
     audio_path = audio_path.resolve()
     ass_path = ass_path.resolve()
     out_path = out_path.resolve()

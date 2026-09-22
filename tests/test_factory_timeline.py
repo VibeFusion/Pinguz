@@ -55,3 +55,11 @@ def test_plan_errors():
         timeline.plan([_clip(0)], 0.0)
     with pytest.raises(ValueError, match="min_cut"):
         timeline.plan([_clip(0)], 5.0, min_cut=4.0, max_cut=2.0)
+
+
+def test_plan_open_with_and_first_cut():
+    clips = [_clip(i) for i in range(4)]
+    segs = timeline.plan(clips, 20.0, seed=1, open_with=clips[2], first_cut=1.5)
+    assert segs[0].clip is clips[2] and segs[0].duration == pytest.approx(1.5)
+    assert segs[1].clip is not clips[2]
+    assert abs(sum(s.duration for s in segs) - 20.0) < 1e-6

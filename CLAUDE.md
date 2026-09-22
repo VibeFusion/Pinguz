@@ -1,5 +1,12 @@
 # Pinguz — Claude Code Context
 
+> **Continuing the Jury's In channel work? Read [`docs/HANDOFF.md`](docs/HANDOFF.md) first.**
+> It carries the decisions already settled (voice, cut plan, script lengths), the
+> virality-predictor measurements, the AI-disclosure and monetisation research, the
+> brand assets in `brand/`, and the operating rules — including **never schedule
+> background check-ins, routines or PR subscriptions**, which cost the owner real
+> money once already.
+
 ## What This Project Is
 
 Two things in one repo:
@@ -43,8 +50,12 @@ src/factory/
   captions.py   — word timings → ASS subtitles
   timeline.py   — seeded cut planner (2–4 s cuts, no consecutive clip repeats)
   assemble.py   — ffmpeg render, 1080×1920 H.264/AAC
-  cli.py        — `factory bank | bank-list | ideas | script | make`
+  platforms.py  — per-platform limits/safe zones; `factory export` packaging
+  cli.py        — `factory bank | bank-import | bank-list | ideas | script | make | export`
 scripts/smoke_test.py
+brand/          — Jury's In channel kit: channel.md, kit.py generator, slate.json (24 premises),
+                  scripts/ (3 ready scripts), kit/ (rendered covers, banner, icon, stamps)
+experiments/    — ab-scores.json (hook A/B predictor scores), v4/ (cut record, word timings)
 tests/          — test_muapi, test_server, test_factory_*
 .claude/mcp.json, .claude/skills/
 ATLAS_PRODUCTION_GUIDE.md — Higgsfield model/skill reference for the ATLAS brand
@@ -68,8 +79,10 @@ factory bank --dry-run                  # print the prompts
 factory bank --per-category 2           # 20 clips into bank/ (≈4 in flight)
 factory ideas "petty revenge at work" -n 10 --out ideas.json
 factory script "premise…" --style AITA --out script.json
+factory script "premise…" --length long --out tiktok.json   # 175–200 words, ≥ 60 s
 factory make --script script.json --out out/x.mp4 --seed 42
 factory make --text "raw narration" --tts stub --out out/test.mp4   # no keys needed
+factory export --video out/x.mp4 --script script.json          # per-platform folders
 ```
 
 `factory make` writes a sidecar `.json` recording every cut (clip id, offset, duration) so a
@@ -79,8 +92,17 @@ static binary in `imageio-ffmpeg` — do not add a system ffmpeg dependency.
 Design rules that matter for the format:
 - Background must never carry narrative: no faces, no text, continuous motion.
 - Stories are **original fiction** from the script agent — never scrape Reddit.
-- The script agent's retention structure (cold open, second hook ~15 s, payoff last,
-  130–170 words) lives in `story.SCRIPT_SYSTEM`. Change it there, not in the CLI.
+- The script agent's retention structure (cold open, second hook ~15 s, payoff last)
+  lives in `story.script_system()`; word budgets per length in `story.LENGTHS`
+  (short 120–140, long 175–200). Change them there, not in the CLI.
+- Every script carries a `verdict` (the host's one-line take). `factory make` renders it as a
+  3 s end card after the narration (music keeps playing via `apad`); `factory export` puts it
+  in captions. This is the creator-perspective layer YouTube's 2025 policy asks for.
+- Default ElevenLabs voice is premade **Adam** (`pNInz6obpgDQGcFmaJgB`): the narrator most
+  viral Reddit-story channels use and the user's pick. Override with `--voice` or
+  `ELEVENLABS_VOICE_ID`.
+- Platform limits (durations, caption/hashtag caps, safe zones) live in `platforms.PLATFORMS`;
+  `docs/PUBLISHING.md` has the upload-API notes per platform.
 
 ## The Five MCP Tools
 

@@ -1,0 +1,109 @@
+{
+ "voice": "ElevenLabs Adam pNInz6obpgDQGcFmaJgB",
+ "seed": 42,
+ "total": 48.923,
+ "segments": [
+  {
+   "clip": "c6",
+   "category": "marble-run",
+   "start": 4.183130115511475,
+   "duration": 1.5
+  },
+  {
+   "clip": "c0",
+   "category": "soap-cutting",
+   "start": 1.116437227530444,
+   "duration": 3.4831009995196656
+  },
+  {
+   "clip": "c2",
+   "category": "hydraulic-press",
+   "start": 3.091878916756197,
+   "duration": 3.472942428328025
+  },
+  {
+   "clip": "c5",
+   "category": "wood-splitting",
+   "start": 2.475888853609771,
+   "duration": 2.173877665258832
+  },
+  {
+   "clip": "c0",
+   "category": "soap-cutting",
+   "start": 1.3621386814415333,
+   "duration": 2.187390479723185
+  },
+  {
+   "clip": "c5",
+   "category": "wood-splitting",
+   "start": 1.190824385707467,
+   "duration": 2.0530719393677272
+  },
+  {
+   "clip": "c6",
+   "category": "marble-run",
+   "start": 1.9462993035373104,
+   "duration": 3.402649947180472
+  },
+  {
+   "clip": "c3",
+   "category": "slime",
+   "start": 3.936639636038931,
+   "duration": 3.1785313677518174
+  },
+  {
+   "clip": "c0",
+   "category": "soap-cutting",
+   "start": 0.7223602585537969,
+   "duration": 3.5176147342595345
+  },
+  {
+   "clip": "c4",
+   "category": "food-processing",
+   "start": 0.8336031776249486,
+   "duration": 2.6805010330359837
+  },
+  {
+   "clip": "c7",
+   "category": "paint-mixing",
+   "start": 0.497934895775598,
+   "duration": 2.6731890902252538
+  },
+  {
+   "clip": "c0",
+   "category": "soap-cutting",
+   "start": 1.8312344508786558,
+   "duration": 2.717958760969257
+  },
+  {
+   "clip": "c3",
+   "category": "slime",
+   "start": 3.2310651413088287,
+   "duration": 3.61425654654876
+  },
+  {
+   "clip": "c5",
+   "category": "wood-splitting",
+   "start": 5.342255453179045,
+   "duration": 2.2496523257064185
+  },
+  {
+   "clip": "c0",
+   "category": "soap-cutting",
+   "start": 4.095532832546231,
+   "duration": 3.104081262546454
+  },
+  {
+   "clip": "c5",
+   "category": "wood-splitting",
+   "start": 1.5445780960314275,
+   "duration": 3.770903495873614
+  },
+  {
+   "clip": "c1",
+   "category": "kinetic-sand",
+   "start": 0.2244809198466037,
+   "duration": 3.1432779237050124
+  }
+ ]
+}

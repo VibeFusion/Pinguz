@@ -18,7 +18,7 @@ _STYLE_VALUES = (
 # safe area — MarginV keeps it out of the top 10% that platform UI covers.
 _HOOK_STYLE_VALUES = (
     "Hook,{font},{hook_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&HA0000000,"
-    "-1,0,0,0,100,100,0,0,3,14,0,8,80,80,{hook_margin},1"
+    "-1,0,0,0,100,100,0,0,{hook_border},{hook_outline},0,8,80,80,{hook_margin},1"
 )
 _HEADER = (
     "[Script Info]\n"
@@ -125,22 +125,37 @@ def to_ass(
     highlight: bool = False,
     hook: str | None = None,
     hook_seconds: float = 3.0,
+    hook_box: bool = True,
+    outro: str | None = None,
+    outro_start: float = 0.0,
+    outro_seconds: float = 3.0,
 ) -> str:
     """Render word timings as a complete ASS subtitle document.
 
     highlight=True keeps a whole card on screen and colours the spoken word.
-    hook=... shows a boxed title card in the upper third for the first
-    `hook_seconds`, so the video reads even when muted.
+    hook=... shows a title card in the upper third for the first `hook_seconds`,
+    so the video reads even when muted; hook_box=False draws it as outlined text
+    over the footage instead of on an opaque box. outro=... shows a second card
+    (the creator's verdict) from `outro_start` for `outro_seconds`, after the
+    narration ends — the creator-perspective layer platforms now reward.
     """
     header = _HEADER.format(
         width=width, height=height, font=font, size=size, outline=outline, shadow=shadow,
         hook_size=max(int(size * 0.5), 40), hook_margin=int(height * 0.14),
+        # BorderStyle 3 = opaque box behind the text; 1 = outline only (text over motion)
+        hook_border=3 if hook_box else 1, hook_outline=14 if hook_box else 6,
     )
     lines = [header]
     if hook:
         lines.append(
             f"Dialogue: 1,{format_time(0)},{format_time(hook_seconds)},Hook,,0,0,0,,"
             f"{_escape(hook.strip())}\n"
+        )
+    if outro:
+        lines.append(
+            f"Dialogue: 1,{format_time(outro_start)},"
+            f"{format_time(outro_start + outro_seconds)},Hook,,0,0,0,,"
+            f"{_escape(outro.strip())}\n"
         )
     if highlight:
         lines.extend(karaoke_lines(words, per_card, uppercase=uppercase))

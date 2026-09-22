@@ -30,8 +30,9 @@ def test_build_command_layout(monkeypatch):
     fc = cmd[cmd.index("-filter_complex") + 1]
     assert "concat=n=2:v=1:a=0[vc]" in fc and "[vc]ass=captions.ass[vout]" in fc
     assert cmd[cmd.index("-map") + 1] == "[vout]"
-    assert "[2:a]loudnorm" in fc and "[aout]" in cmd  # narration is input 2, normalised
+    assert "[2:a]apad=whole_dur=5.000,loudnorm" in fc and "[aout]" in cmd  # input 2, padded
     assert "-r" in cmd and cmd[cmd.index("-r") + 1] == "30"
+    assert cmd[cmd.index("-t", cmd.index("-map")) + 1] == "5.000"  # capped at 3.0 + 2.0 s
     assert cmd[-1] == "out.mp4"
 
 
@@ -86,3 +87,16 @@ def test_end_to_end_offline_render(tmp_path):
                           width=180, height=320, fps=15, preset="ultrafast")
     assert out.exists() and out.stat().st_size > 1000
     assert abs(assemble.probe_duration(out) - speech.duration) < 0.5
+
+
+def test_build_command_total_pads_narration_for_end_card(tmp_path):
+    clip = Clip("c", tmp_path / "c.mp4", "x", "p", 8.0, "m", "r")
+    segs = [timeline.Segment(clip, 0.0, 3.0), timeline.Segment(clip, 1.0, 3.0)]
+    cmd = assemble.build_command(segs, tmp_path / "v.wav", "captions.ass", tmp_path / "o.mp4",
+                                 total=6.0)
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "apad=whole_dur=6.000" in fc
+    assert cmd[cmd.index("-t", cmd.index("-map")) + 1] == "6.000"
+    with pytest.raises(assemble.RenderError):
+        assemble.build_command(segs, tmp_path / "v.wav", "captions.ass", tmp_path / "o.mp4",
+                               total=0.0)
