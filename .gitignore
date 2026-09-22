@@ -10,3 +10,5 @@ build/
 .ruff_cache/
 .mypy_cache/
 .DS_Store
+brand/fonts/*.ttf
+experiments/**/*.mp4

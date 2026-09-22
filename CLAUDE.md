@@ -1,5 +1,12 @@
 # Pinguz — Claude Code Context
 
+> **Continuing the Jury's In channel work? Read [`docs/HANDOFF.md`](docs/HANDOFF.md) first.**
+> It carries the decisions already settled (voice, cut plan, script lengths), the
+> virality-predictor measurements, the AI-disclosure and monetisation research, the
+> brand assets in `brand/`, and the operating rules — including **never schedule
+> background check-ins, routines or PR subscriptions**, which cost the owner real
+> money once already.
+
 ## What This Project Is
 
 Two things in one repo:
@@ -46,6 +53,9 @@ src/factory/
   platforms.py  — per-platform limits/safe zones; `factory export` packaging
   cli.py        — `factory bank | bank-import | bank-list | ideas | script | make | export`
 scripts/smoke_test.py
+brand/          — Jury's In channel kit: channel.md, kit.py generator, slate.json (24 premises),
+                  scripts/ (3 ready scripts), kit/ (rendered covers, banner, icon, stamps)
+experiments/    — ab-scores.json (hook A/B predictor scores), v4/ (cut record, word timings)
 tests/          — test_muapi, test_server, test_factory_*
 .claude/mcp.json, .claude/skills/
 ATLAS_PRODUCTION_GUIDE.md — Higgsfield model/skill reference for the ATLAS brand
