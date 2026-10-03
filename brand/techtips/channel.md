@@ -19,6 +19,21 @@ to keep a daily output going.
 Recommended: **Hidden Setting**. The numbering builds a collectible series, and the
 name still fits long-form ("10 Hidden Settings in iOS 26").
 
+**Handle status (2026-10-03): unverified.** A web search found no existing
+"Hidden Setting" channel, but the profile pages couldn't be opened from the cloud
+session, so empty or private accounts holding the handle can't be ruled out.
+Check each platform by hand:
+
+| Platform | URL | Status |
+|---|---|---|
+| YouTube | youtube.com/@hiddensetting | ? |
+| TikTok | tiktok.com/@hiddensetting | ? |
+| Instagram | instagram.com/hiddensetting | ? |
+| Facebook | facebook.com/hiddensetting | ? |
+
+Fallbacks, in order, if any is taken: @hiddensettings, @hiddensettingtv,
+@thehiddensetting, @hiddensettinghq. Use one handle across all four platforms.
+
 ## 2. Formats
 
 | | Short | Long |
